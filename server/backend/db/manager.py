@@ -33,7 +33,7 @@ load_dotenv()
 
 class DBManager:
     # MongoDB Atlas에 연결
-    def __init__(self, uri: str = URI, db_name: str = "data_metadata", collection_name: str = "files"):
+    def __init__(self, uri: str = URI, db_name: str = "test", collection_name: str = "files"):
         
         self.client = MongoClient(uri, server_api=ServerApi('1'))
         
@@ -72,6 +72,8 @@ class DBManager:
                location_name: str,
                client_id: str,
                metadata: Dict = None,
+               caption: str = "",
+               event: bool = False,
                current_file_path: str = None) -> str:
 
         # TODO: 이 구조 변경.
@@ -81,7 +83,9 @@ class DBManager:
             "location_name": location_name,
             "client_id": client_id,
             "metadata": metadata or {},
-            "updated_at": datetime.utcnow()
+            "updated_at": datetime.utcnow(),
+            "caption": caption,
+            "event": event
         }
         # S3
         result = self.collection.insert_one(doc)

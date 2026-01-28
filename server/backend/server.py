@@ -5,8 +5,7 @@ from fastapi.concurrency import asynccontextmanager
 from fastapi.responses import StreamingResponse, ORJSONResponse
 from lib.encrypt import encrypt_payload, decrypt_payload
 from lib.tracker import InstanceSelector
-import boto3
-
+from lib.clova import CompletionExecutor
 
 from db.manager import DBManager
 from datetime import datetime
@@ -33,7 +32,6 @@ DB = DBManager(
 
 # Instance Selector 초기화
 selector = InstanceSelector(iou_thresh=0.2, data_dir="./store")
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -94,6 +92,57 @@ async def watchdog_loop():
                 STATE[client_id].is_connected = False
                 DB.set_client_status(client_id, False)
 
+def clova_caption(image_path: str, json_path: str) -> str:
+    completion_executor = CompletionExecutor(
+        host='https://clovastudio.stream.ntruss.com',
+        api_key=os.getenv('CLOVA_API_KEY', ""),
+        request_id='450573ae85b94325a5b2720e77eaa790'
+    )
+    caption = completion_executor.execute(
+        image_path=image_path,
+        json_path=json_path)
+    return caption
+
+def upload_db(frame_files):
+    print("FULL")
+    to_save = selector.select_best_filenames(frame_files)
+    print("To save is:", to_save)
+    
+    for img_file in to_save:
+        # DB upload
+        json_file = img_file.replace(".jpg", ".json")
+        caption = clova_caption(
+            "./store" + "/" + img_file,
+            "./store" + "/" + json_file
+        )
+        print("CAPTIONN:    ")
+        print(caption)
+        with open(os.path.join("./store", json_file), "r", encoding="utf-8") as f:
+            meta = json.load(f)
+            r = DB.create(
+                created_at=img_file.split(".jpg")[0],
+                remote_file_path=f"images/{img_file}",
+                location_name=meta.get("location", "unknown"),
+                client_id=json_file.split("@")[0],
+                metadata=meta,
+                current_file_path=os.path.join("./store", img_file),
+                caption=caption,
+            )
+            print(r)
+
+    # 폴더에서, "맨 뒤 5프레임" 제외 삭제
+    data_dir = selector.data_dir
+    jpg_paths = sorted(data_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime)
+    keep_set = set(p.name for p in jpg_paths[-5:])  
+    for p in jpg_paths:
+        if p.name in keep_set:
+            continue
+        # jpg 삭제
+        p.unlink(missing_ok=True)
+        # 매칭 json 삭제
+        json_p = p.with_suffix(".json")
+        json_p.unlink(missing_ok=True)
+
 
 # ====== API 엔드포인트 ======
 @app.post("/heartbeat")
@@ -126,39 +175,6 @@ async def connection_state():
         "last_client_id": STATE.last_client_id, # 마지막 HEARTBEAT 보낸 클라이언트 ID
         "timeout_sec": HEARTBEAT_TIMEOUT_SEC, # 타임아웃 설정 값
     }
-
-
-def upload_db(frame_files):
-    print("FULL")
-    to_save = selector.select_best_filenames(frame_files)
-    print("To save is:", to_save)
-    
-    for img_file in to_save:
-        # DB upload
-        json_file = img_file.replace(".jpg", ".json")
-        with open(os.path.join("./store", json_file), "r", encoding="utf-8") as f:
-            meta = json.load(f)
-            DB.create(
-                created_at=img_file.split(".jpg")[0],
-                remote_file_path=f"images/{img_file}",
-                location_name=meta.get("location", "unknown"),
-                client_id=json_file.split("@")[0],
-                metadata=meta,
-                current_file_path=os.path.join("./store", img_file)
-            )
-
-    # 폴더에서, "맨 뒤 5프레임" 제외 삭제
-    data_dir = selector.data_dir
-    jpg_paths = sorted(data_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime)
-    keep_set = set(p.name for p in jpg_paths[-5:])  
-    for p in jpg_paths:
-        if p.name in keep_set:
-            continue
-        # jpg 삭제
-        p.unlink(missing_ok=True)
-        # 매칭 json 삭제
-        json_p = p.with_suffix(".json")
-        json_p.unlink(missing_ok=True)
 
 # ====== 이미지 업로드 및 다운로드 ======
 # AES-GCM 암호화된 이미지+json 업로드

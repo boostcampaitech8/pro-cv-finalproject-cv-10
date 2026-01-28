@@ -9,6 +9,7 @@ class InstanceSelector:
     def __init__(self, data_dir: str, iou_thresh: float = 0.3):
         self.data_dir = Path(data_dir)
         self.iou_thresh = iou_thresh
+        self.last_chosen_files = []  # 최근에 선택된 파일 목록 저장용 변수
 
     def bbox_to_tlbr(self, bbox: List[float]) -> np.ndarray:
         x, y, w, h = bbox
@@ -41,7 +42,7 @@ class InstanceSelector:
         frame_detections: List[List[Dict]] = []
 
         for filename in frame_filenames:
-            json_path = (self.data_dir / filename).with_suffix(".json")  # 권장 [web:62]
+            json_path = (self.data_dir / filename).with_suffix(".json") 
             if not json_path.exists():
                 frame_detections.append([])
                 continue
@@ -53,7 +54,7 @@ class InstanceSelector:
             for ann in anno.get("annotations", []):
                 detections.append(
                     {
-                        "filename": filename,               # json의 ann['filename'] 대신 실제 파일명 사용
+                        "filename": filename,              
                         "bbox": ann["bbox"],
                         "class": ann.get("class", "0"),
                         "area": ann.get("area", 0),
@@ -67,7 +68,6 @@ class InstanceSelector:
     def match_instances_across_frames(
         self, frame_detections: List[List[Dict]]
     ) -> Dict[int, List[Dict]]:
-        """Simple greedy IoU matching (frame-to-last)"""
         instance_tracks: Dict[int, List[Dict]] = {}
         next_instance_id = 0
 
@@ -125,6 +125,11 @@ class InstanceSelector:
 
         # 중복 제거(순서 유지)
         uniq = list(dict.fromkeys(selected))
+        # 최근에 선택된 파일은 제외
+        for filename in uniq:
+            if filename in self.last_chosen_files:
+                uniq.remove(filename)
+        self.last_chosen_files = uniq  # 최근에 선택된 파일 목록 저장
         return uniq
 
 

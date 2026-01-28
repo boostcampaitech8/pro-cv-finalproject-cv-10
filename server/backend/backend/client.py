@@ -3,8 +3,14 @@ from fastapi import requests
 import httpx
 from encrypt import encrypt_payload, decrypt_payload
 
-SERVER = os.environ.get("SERVER", "https://localhost:8443")
-CLIENT_ID = os.environ.get("CLIENT_ID", "client-1")
+# ngrok 가입 후,ngrok config add-authtoken <your_token> 입력.
+# uvicorn server:app --host 0.0.0.0 --port 8000
+# ngrok http 8000 후
+# export SERVER=""로.
+SERVER = os.environ.get("SERVER", "https://localhost:8000")
+#SERVER = "https://localhost:8000"
+print(SERVER)
+CLIENT_ID = os.environ.get("CLIENT_ID", "client_1")
 SHARED_KEY = bytes.fromhex(os.environ.get("SHARED_KEY_HEX", "00"*32))
 SESSION_KEY = bytes.fromhex(os.environ.get("SESSION_KEY_HEX", "11"*32))  # 서버와 동일한 세션키
 
@@ -87,14 +93,37 @@ async def upload_image_and_json_enc(image_path: str, json_path: str):
     r = await request_with_retry("POST", "/upload_image_enc", files=files)
     return r.json()
 
+
+async def upload_image_and_json(image_path: str, json_path: str):
+    """Upload with HMAC signature"""
+    with open(image_path, "rb") as f:
+        image_bytes = f.read()
+    with open(json_path, "rb") as f:
+        json_bytes = f.read()
+
+    plaintext = pack_two_files(image_bytes, json_bytes)
+
+    ts = str(time.time())
+    sig = compute_hmac(CLIENT_ID, ts, plaintext, SESSION_KEY)
+    
+    files = {
+        "client_id": (None, CLIENT_ID),
+        "ts": (None, ts),
+        "sig": (None, sig),  # HMAC 서명 추가
+        "plaintext": ("data.bin", plaintext, "application/octet-stream"),
+    }
+
+    r = await request_with_retry("POST", "/upload_image", files=files)
+    return r.json()
+
 async def main():
     hb_task = asyncio.create_task(heartbeat_loop())
 
     try:
-        for i in range(1001,1011):
-            resp = await upload_image_and_json_enc(
-                f"./sample_images/img/I1_S0_C5_000{i}.jpg",
-                f"./sample_images/label/I1_S0_C5_000{i}.json",
+        for i in range(10):
+            resp = await upload_image_and_json(
+                f"./samples/img/frame_0{i}.jpg",
+                f"./samples/label/frame_0{i}.json",
             )
             print("uploaded:", resp)
         while True:

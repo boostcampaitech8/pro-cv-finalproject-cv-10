@@ -8,8 +8,12 @@ from tracker import InstanceSelector
 import boto3
 
 
-from db.manager import MongoDBAtlasManager
+from db.manager import DBManager
 from datetime import datetime
+
+# ====== USAGE ======
+# uvicorn server:app --host 0.0.0.0 --port 8000
+# ngrok http 8000
 
 # ====== 설정 ======
 SHARED_KEY = bytes.fromhex(os.environ.get("SHARED_KEY_HEX", "00"*32))  # 파일 암호화용
@@ -21,35 +25,14 @@ os.makedirs(STORE_DIR, exist_ok=True)
 HEARTBEAT_TIMEOUT_SEC = int(os.environ.get("HEARTBEAT_TIMEOUT_SEC", "15"))
 WATCHDOG_PERIOD_SEC = float(os.environ.get("WATCHDOG_PERIOD_SEC", "1.0"))
 
-URI = ""
-AWS_ACCESS_KEY_ID = ""
-AWS_SECRET_ACCESS_KEY = ""
-# MongoDB Atlas 연결
-DB = MongoDBAtlasManager(
+URI = os.environ.get("URI")
+# DB 연결
+DB = DBManager(
     uri=URI
 )
 
-# AWS S3 설정
-BUCKET = "pro-cv-finalproject-cv-10-ehekafhr"
-s3 = boto3.client("s3", region_name="ap-southeast-2",
-                  aws_access_key_id=AWS_ACCESS_KEY_ID,
-                  aws_secret_access_key=AWS_SECRET_ACCESS_KEY )
-
 # Instance Selector 초기화
 selector = InstanceSelector(iou_thresh=0.2, data_dir="./store")
-
-def DB_upload_metadata(file_path: str, created_at: datetime, location_name: str, metadata: Dict[str, Any]) -> str:
-    remote_file_path = f"s3://{BUCKET}/{file_path}"
-    doc_id = DB.create(
-        created_at=created_at,
-        remote_file_path=remote_file_path,
-        location_name=location_name,
-        metadata=metadata
-    )
-    return doc_id
-
-def S3_upload_file(file_path: str, local_path: str) -> None:
-    s3.upload_file(local_path, BUCKET, file_path)
 
 
 @asynccontextmanager
@@ -69,7 +52,7 @@ class ConnectionState:
         self.is_connected: bool = False
         self.last_client_id: Optional[str] = None
 
-STATE = ConnectionState()
+STATE = {} # 전역 상태 객체
 
 def _now() -> float:
     return time.time()
@@ -106,11 +89,10 @@ def unpack_two_files(payload: bytes) -> tuple[bytes, bytes]:
 async def watchdog_loop():
     while True:
         await asyncio.sleep(WATCHDOG_PERIOD_SEC)
-        if STATE.last_seen_ts is None:
-            STATE.is_connected = False
-            continue
-        if _now() - STATE.last_seen_ts > HEARTBEAT_TIMEOUT_SEC:
-            STATE.is_connected = False
+        for client_id, state in STATE.items():
+            if _now() - state.last_seen_ts > HEARTBEAT_TIMEOUT_SEC:
+                STATE[client_id].is_connected = False
+                DB.set_client_status(client_id, False)
 
 
 # ====== API 엔드포인트 ======
@@ -124,20 +106,62 @@ async def heartbeat(client_id: str = Form(...), ts: str = Form(...), sig: str = 
     if not verify_hmac(client_id, ts, b"", sig, SESSION_KEY):
         raise HTTPException(status_code=401, detail="Invalid signature")
     
-    STATE.last_seen_ts = _now()
-    STATE.is_connected = True
-    STATE.last_client_id = client_id
-    return {"ok": True, "server_ts": STATE.last_seen_ts}
+    if client_id not in STATE:
+        STATE[client_id] = ConnectionState()
+        STATE[client_id].is_connected = True
+        STATE[client_id].last_seen_ts = _now()
+    else:
+        STATE[client_id].last_seen_ts = _now()
+        STATE[client_id].is_connected = True
+    
+    DB.set_client_status(client_id, True)
+
+    return {"ok": True, "server_ts": STATE[client_id].last_seen_ts}
 
 @app.get("/connection_state")
 async def connection_state():
     return {
-        "is_connected": STATE.is_connected,
-        "last_seen_ts": STATE.last_seen_ts,
-        "last_client_id": STATE.last_client_id,
-        "timeout_sec": HEARTBEAT_TIMEOUT_SEC,
+        "is_connected": STATE.is_connected, #15초 이상 HEARTBEAT 없으면 False
+        "last_seen_ts": STATE.last_seen_ts, # 마지막 HEARTBEAT 수신 시각
+        "last_client_id": STATE.last_client_id, # 마지막 HEARTBEAT 보낸 클라이언트 ID
+        "timeout_sec": HEARTBEAT_TIMEOUT_SEC, # 타임아웃 설정 값
     }
 
+
+def upload_db(frame_files):
+    print("FULL")
+    to_save = selector.select_best_filenames(frame_files)
+    print("To save is:", to_save)
+    
+    for img_file in to_save:
+        # DB upload
+        json_file = img_file.replace(".jpg", ".json")
+        with open(os.path.join("./store", json_file), "r", encoding="utf-8") as f:
+            meta = json.load(f)
+            DB.create(
+                created_at=img_file.split(".jpg")[0],
+                remote_file_path=f"images/{img_file}",
+                location_name=meta.get("location", "unknown"),
+                client_id=json_file.split("@")[0],
+                metadata=meta,
+                current_file_path=os.path.join("./store", img_file)
+            )
+
+    # 폴더에서, "맨 뒤 5프레임" 제외 삭제
+    data_dir = selector.data_dir
+    jpg_paths = sorted(data_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime)
+    keep_set = set(p.name for p in jpg_paths[-5:])  
+    for p in jpg_paths:
+        if p.name in keep_set:
+            continue
+        # jpg 삭제
+        p.unlink(missing_ok=True)
+        # 매칭 json 삭제
+        json_p = p.with_suffix(".json")
+        json_p.unlink(missing_ok=True)
+
+# ====== 이미지 업로드 및 다운로드 ======
+# AES-GCM 암호화된 이미지+json 업로드
 @app.post("/upload_image_enc", response_class=ORJSONResponse)
 async def upload_image_enc(
     client_id: str = Form(...),
@@ -166,47 +190,53 @@ async def upload_image_enc(
 
         image_id = str(uuid.uuid4())
         curtime = datetime.now()
-        with open(os.path.join(STORE_DIR, f"{curtime}.jpg"), "wb") as f:
+        with open(os.path.join(STORE_DIR, f"{client_id}@{curtime}.jpg"), "wb") as f:
             f.write(image_bytes)
-        with open(os.path.join(STORE_DIR, f"{curtime}.json"), "wb") as f:
+        with open(os.path.join(STORE_DIR, f"{client_id}@{curtime}.json"), "wb") as f:
             f.write(json_bytes)
         
         # DB 및 S3 업로드
         frame_files = sorted([p.name for p in selector.data_dir.glob("*.jpg")])
         if len(frame_files) >= 10:
-            print("FULL")
-            to_save = selector.select_best_filenames(frame_files)
-            print("To save is:", to_save)
-            
-            for img_file in to_save:
-                # DB upload
-                json_file = img_file.replace(".jpg", ".json")
-                with open(os.path.join("./store", json_file), "r", encoding="utf-8") as f:
-                    meta = json.load(f)
-                    image_id = DB_upload_metadata(
-                        file_path=f"images/{img_file}",
-                        created_at = img_file.split(".jpg")[0],
-                        location_name=meta.get("location", "unknown"),
-                        metadata=meta
-                    )
-                # S3 upload
-                s3_file_path = f"images/{img_file}"
-                local_img_path = os.path.join(selector.data_dir, img_file)
-                S3_upload_file(s3_file_path, local_img_path)
+            upload_db(frame_files)
 
-            # 폴더에서, "맨 뒤 5프레임" 제외 삭제
-            data_dir = selector.data_dir
-            jpg_paths = sorted(data_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime)
-            keep_set = set(p.name for p in jpg_paths[-5:])  
-            for p in jpg_paths:
-                if p.name in keep_set:
-                    continue
-                # jpg 삭제
-                p.unlink(missing_ok=True)
-                # 매칭 json 삭제
-                json_p = p.with_suffix(".json")
-                json_p.unlink(missing_ok=True)
 
+        return {"ok": True, "image_id": image_id, "client_id": client_id, "ts": ts, "meta_keys": list(meta.keys())}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"decrypt/unpack failed: {e}")
+
+# 평문 이미지+json 업로드
+@app.post("/upload_image", response_class=ORJSONResponse)
+async def upload_image(
+    client_id: str = Form(...),
+    ts: str = Form(...),
+    sig: str = Form(...),  
+    plaintext: UploadFile = File(...),
+):
+    try:
+        pt_b = await plaintext.read()
+
+        # HMAC 검증: plaintext를 함께 서명
+        if not verify_hmac(client_id, ts, pt_b, sig, SESSION_KEY):
+            raise HTTPException(status_code=401, detail="Invalid signature")
+        
+        # 파일 암호화 복호화
+        image_bytes, json_bytes = unpack_two_files(pt_b)
+        meta = json.loads(json_bytes.decode("utf-8"))
+
+        image_id = str(uuid.uuid4())
+        curtime = datetime.now()
+        with open(os.path.join(STORE_DIR, f"{client_id}@{curtime}.jpg"), "wb") as f:
+            f.write(image_bytes)
+        with open(os.path.join(STORE_DIR, f"{client_id}@{curtime}.json"), "wb") as f:
+            f.write(json_bytes)
+        
+        # DB 및 S3 업로드
+        frame_files = sorted([p.name for p in selector.data_dir.glob("*.jpg")])
+        if len(frame_files) >= 10:
+            upload_db(frame_files)
                 
         return {"ok": True, "image_id": image_id, "client_id": client_id, "ts": ts, "meta_keys": list(meta.keys())}
     except HTTPException:
@@ -214,34 +244,6 @@ async def upload_image_enc(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"decrypt/unpack failed: {e}")
 
-@app.get("/download_image/{image_id}")
-async def download_image(image_id: str):
-    nonce_path = os.path.join(STORE_DIR, f"{image_id}.nonce")
-    bin_path = os.path.join(STORE_DIR, f"{image_id}.bin")
-    if not (os.path.exists(nonce_path) and os.path.exists(bin_path)):
-        raise HTTPException(status_code=404, detail="not found")
-
-    nonce = open(nonce_path, "rb").read()
-    ciphertext = open(bin_path, "rb").read()
-    payload = decrypt_payload(SHARED_KEY, nonce, ciphertext, aad=b"img+json:v1")
-    meta, img = unpack_image_json(payload)
-
-    boundary = "----fastapi-boundary"
-
-    def gen():
-        yield f"--{boundary}\r\nContent-Type: application/json\r\n\r\n".encode()
-        yield json.dumps(meta, ensure_ascii=False).encode("utf-8")
-        yield b"\r\n"
-        yield f"--{boundary}\r\nContent-Type: application/octet-stream\r\n\r\n".encode()
-        yield img
-        yield b"\r\n"
-        yield f"--{boundary}--\r\n".encode()
-
-    return StreamingResponse(gen(), media_type=f"multipart/mixed; boundary={boundary}")
-
-@app.get("/request_image")
-async def request_image():
-    pass
 
 if __name__ == "__main__":
     import uvicorn

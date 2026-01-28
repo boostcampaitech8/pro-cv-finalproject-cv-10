@@ -1,7 +1,7 @@
 import os, json, time, asyncio, hmac, hashlib
 from fastapi import requests
 import httpx
-from encrypt import encrypt_payload, decrypt_payload
+from lib.encrypt import encrypt_payload, decrypt_payload
 
 # ngrok 가입 후,ngrok config add-authtoken <your_token> 입력.
 # uvicorn server:app --host 0.0.0.0 --port 8000

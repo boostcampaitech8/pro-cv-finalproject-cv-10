@@ -3,8 +3,8 @@ from typing import Dict, Any, Optional
 from fastapi import FastAPI, Path, UploadFile, File, Form, HTTPException, Request
 from fastapi.concurrency import asynccontextmanager
 from fastapi.responses import StreamingResponse, ORJSONResponse
-from encrypt import encrypt_payload, decrypt_payload
-from tracker import InstanceSelector
+from lib.encrypt import encrypt_payload, decrypt_payload
+from lib.tracker import InstanceSelector
 import boto3
 
 

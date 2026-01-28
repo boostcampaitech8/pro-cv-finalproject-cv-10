@@ -14,11 +14,13 @@ from PIL import Image
 from io import BytesIO
 
 """
+
 export URI=
 
 export AWS_ACCESS_KEY_ID=
 
 export AWS_SECRET_ACCESS_KEY=
+
 """
 
 URI = os.environ.get("URI")
@@ -40,9 +42,7 @@ class DBManager:
             self.client.admin.command('ping')
         except Exception as e:
             raise ConnectionError(f"MongoDB 연결 실패: {e}")
-        
-        
-        
+                
         self.db = self.client[db_name] # "data_metadata"
         self.collection = self.db[collection_name] # "files"
         self.client_status_collection = self.db["client_status"]  # 클라이언트 상태 저장 컬렉션

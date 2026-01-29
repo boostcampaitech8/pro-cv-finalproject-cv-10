@@ -1,4 +1,5 @@
-import os, time, json, asyncio, uuid, hmac, hashlib
+import traceback
+import os, time, json, asyncio, uuid, hmac, hashlib, shutil
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, Path, UploadFile, File, Form, HTTPException, Request
 from fastapi.concurrency import asynccontextmanager
@@ -6,6 +7,10 @@ from fastapi.responses import StreamingResponse, ORJSONResponse
 from lib.encrypt import encrypt_payload, decrypt_payload
 from lib.tracker import InstanceSelector
 from lib.clova import CompletionExecutor
+
+import multiprocessing as mp
+
+from pathlib import Path as PyPath
 
 from db.manager import DBManager
 from datetime import datetime
@@ -26,8 +31,15 @@ WATCHDOG_PERIOD_SEC = float(os.environ.get("WATCHDOG_PERIOD_SEC", "1.0"))
 
 URI = os.environ.get("URI")
 # DB 연결
-DB = DBManager(
-    uri=URI
+
+DB_selected = DBManager(
+    uri=URI,
+    db_name = "selected_object_caption"
+)
+
+DB_streaming  = DBManager(
+    uri=URI,
+    db_name = "streaming_service"
 )
 
 # Instance Selector 초기화
@@ -90,7 +102,7 @@ async def watchdog_loop():
         for client_id, state in STATE.items():
             if _now() - state.last_seen_ts > HEARTBEAT_TIMEOUT_SEC:
                 STATE[client_id].is_connected = False
-                DB.set_client_status(client_id, False)
+                DB_streaming.set_client_status(client_id, False)
 
 def clova_caption(image_path: str, json_path: str) -> str:
     completion_executor = CompletionExecutor(
@@ -103,33 +115,85 @@ def clova_caption(image_path: str, json_path: str) -> str:
         json_path=json_path)
     return caption
 
-def upload_db(frame_files):
-    print("FULL")
-    to_save = selector.select_best_filenames(frame_files)
-    print("To save is:", to_save)
-    
-    for img_file in to_save:
-        # DB upload
-        json_file = img_file.replace(".jpg", ".json")
-        caption = clova_caption(
-            "./store" + "/" + img_file,
-            "./store" + "/" + json_file
-        )
-        print("CAPTIONN:    ")
-        print(caption)
-        with open(os.path.join("./store", json_file), "r", encoding="utf-8") as f:
-            meta = json.load(f)
-            r = DB.create(
-                created_at=img_file.split(".jpg")[0],
-                remote_file_path=f"images/{img_file}",
+
+## multiprocessing 업로드 헬퍼 함수
+def stage_pair(jpg_src: Path, json_src: Path, selected_dir: Path ):
+    # selected_dir=None이면 스테이징 없이 원본 경로 그대로 사용
+    if selected_dir is None:
+        return jpg_src, json_src
+
+    selected_dir.mkdir(parents=True, exist_ok=True)
+    jpg_final = selected_dir / jpg_src.name
+    json_final = selected_dir / json_src.name
+
+    jpg_tmp = selected_dir / (jpg_src.name + ".tmp") #임시 파일
+    json_tmp = selected_dir / (json_src.name + ".tmp") #임시 파일
+
+    shutil.copy2(jpg_src, jpg_tmp)
+    shutil.copy2(json_src, json_tmp)
+
+    # os.replace는 목적지를 원자적으로 교체(스테이징 커밋에 유리) 
+    os.replace(jpg_tmp, jpg_final)
+    os.replace(json_tmp, json_final)
+
+    return jpg_final, json_final
+
+def worker_main(task_q):
+    while True:
+        item = task_q.get()
+        if item is None:   # sentinel로 종료 
+            break
+        try:
+            jpg_path, json_path = PyPath(item[0]), PyPath(item[1])
+
+            caption = clova_caption(str(jpg_path), str(json_path))
+
+            with open(json_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+
+            DB_selected.create(
+                created_at=jpg_path.stem,
+                remote_file_path=f"images/{jpg_path.name}",
                 location_name=meta.get("location", "unknown"),
-                client_id=json_file.split("@")[0],
+                client_id=json_path.name.split("@")[0],
                 metadata=meta,
-                current_file_path=os.path.join("./store", img_file),
+                current_file_path=str(jpg_path),
                 caption=caption,
             )
-            print(r)
+            #파일 삭제
+            jpg_path.unlink(missing_ok=True)
+            json_path.unlink(missing_ok=True)
+        except Exception:
+            traceback.print_exc()
 
+def upload_db_split(frame_files, num_workers=4):
+    data_dir = PyPath("./store")
+    selected_dir = PyPath("./selected_frames")
+    print(selected_dir)
+    to_save = selector.select_best_filenames(frame_files)
+    print(to_save)
+    if not to_save: return
+    task_q = mp.Queue()
+    procs = [mp.Process(target=worker_main, args=(task_q,)) for _ in range(num_workers)]
+    for p in procs:
+        p.start()
+    print(procs)
+    try:
+        for img_file in to_save:
+            jpg_src = data_dir / img_file
+            json_src = data_dir / img_file.replace(".jpg", ".json")
+
+            jpg_path, json_path = stage_pair(jpg_src, json_src, selected_dir)
+            task_q.put((str(jpg_path), str(json_path)))
+    except Exception:
+        traceback.print_exc() 
+
+    finally:
+        for _ in procs:
+            task_q.put(None)  # 종료 신호 
+        for p in procs:
+            p.join()
+    
     # 폴더에서, "맨 뒤 5프레임" 제외 삭제
     data_dir = selector.data_dir
     jpg_paths = sorted(data_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime)
@@ -143,7 +207,21 @@ def upload_db(frame_files):
         json_p = p.with_suffix(".json")
         json_p.unlink(missing_ok=True)
 
+def upload_frame(frame_file: str):
+    json_file = frame_file.replace(".jpg", ".json")
 
+    with open(os.path.join("./store", json_file), "r", encoding="utf-8") as f:
+        meta = json.load(f)
+        r = DB_streaming.create(
+            created_at=frame_file.split(".jpg")[0],
+            remote_file_path=f"images/{frame_file}",
+            location_name=meta.get("location", "unknown"),
+            client_id=json_file.split("@")[0],
+            metadata=meta,
+            current_file_path=os.path.join("./store", frame_file),
+            caption="",
+        )
+        
 # ====== API 엔드포인트 ======
 @app.post("/heartbeat")
 async def heartbeat(client_id: str = Form(...), ts: str = Form(...), sig: str = Form(...)):
@@ -163,7 +241,7 @@ async def heartbeat(client_id: str = Form(...), ts: str = Form(...), sig: str = 
         STATE[client_id].last_seen_ts = _now()
         STATE[client_id].is_connected = True
     
-    DB.set_client_status(client_id, True)
+    DB_streaming.set_client_status(client_id, True)
 
     return {"ok": True, "server_ts": STATE[client_id].last_seen_ts}
 
@@ -214,7 +292,7 @@ async def upload_image_enc(
         # DB 및 S3 업로드
         frame_files = sorted([p.name for p in selector.data_dir.glob("*.jpg")])
         if len(frame_files) >= 10:
-            upload_db(frame_files)
+            upload_db_split(frame_files, data_dir="./store", selected_dir="./selected_frames", num_workers=4)
 
 
         return {"ok": True, "image_id": image_id, "client_id": client_id, "ts": ts, "meta_keys": list(meta.keys())}
@@ -251,15 +329,18 @@ async def upload_image(
         
         # DB 및 S3 업로드
         frame_files = sorted([p.name for p in selector.data_dir.glob("*.jpg")])
+        upload_frame(frame_files[-1])  # 최신 프레임 업로드
         if len(frame_files) >= 10:
-            upload_db(frame_files)
-                
+            try:
+                upload_db_split(frame_files, num_workers=4)
+            except Exception:
+                traceback.print_exc()
+
         return {"ok": True, "image_id": image_id, "client_id": client_id, "ts": ts, "meta_keys": list(meta.keys())}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"decrypt/unpack failed: {e}")
-
 
 if __name__ == "__main__":
     import uvicorn

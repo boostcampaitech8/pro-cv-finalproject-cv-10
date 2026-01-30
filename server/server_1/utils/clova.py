@@ -120,7 +120,7 @@ class CompletionExecutor:
                         },
                         "detected_object": {
                             "type": "object",
-                            "description": "감지된 객체에 대한 정보"
+                            "description": "감지된 객체에 대한 간략한 정보"
                         },
                     },
                     "required": [

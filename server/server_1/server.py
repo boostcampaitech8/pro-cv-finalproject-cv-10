@@ -111,7 +111,7 @@ def clova_caption(image_path: str, json_path: str) -> str:
             api_key=os.getenv('CLOVA_API_KEY', ""),
             request_id='450573ae85b94325a5b2720e77eaa790'
         )
-        caption = completion_executor.execute(
+        caption = completion_executor.image_caption(
             image_path=image_path,
             json_path=json_path)
         return caption

@@ -11,6 +11,7 @@ from .filter import KalmanFilter
 
 warnings.filterwarnings('ignore')
 
+INF = 1e8
 
 @dataclass
 class Detection:
@@ -143,10 +144,9 @@ class ByteTrackAdvanced:
         self, detection: Detection, track: Track
     ) -> float:
 
-        
         predicted_bbox = track.predict_next_bbox()
         if predicted_bbox is None:
-            return float('inf')
+            return float(INF)
         
         # Prediction error (center distance)
         pred_center = (predicted_bbox[:2] + predicted_bbox[2:]) / 2
@@ -183,6 +183,7 @@ class ByteTrackAdvanced:
         n_det = len(detections)
         n_track = len(tracks)
         
+        # track이 없으면 빈 행렬 반환
         if n_det == 0 or n_track == 0:
             return np.empty((n_det, n_track), dtype=np.float32)
         
@@ -192,20 +193,20 @@ class ByteTrackAdvanced:
             for t_idx, track in enumerate(tracks):
                 latest_det = track.get_latest_detection()
                 if latest_det is None:
-                    cost_matrix[d_idx, t_idx] = float('inf')
+                    cost_matrix[d_idx, t_idx] = float(INF)
                     continue
                 
                 # IoU 기반 cost
                 iou_val = self.iou(detection.bbox, latest_det.bbox)
                 if iou_val < iou_thresh:
-                    cost_matrix[d_idx, t_idx] = float('inf')
+                    cost_matrix[d_idx, t_idx] = float(INF)
                     continue
                 
                 iou_cost = 1.0 - iou_val  # IoU 역수
                 
                 # Motion cost
                 motion_cost = self._motion_distance(detection, track)
-                motion_cost = motion_cost / 100.0 if motion_cost != float('inf') else 1.0
+                motion_cost = motion_cost / 100.0 if motion_cost != float(INF) else 1.0
                 
                 # Appearance cost
                 app_cost = self._appearance_distance(detection, track)
@@ -220,10 +221,7 @@ class ByteTrackAdvanced:
         if cost_matrix.size == 0:
             return [], list(range(cost_matrix.shape[0])), list(range(cost_matrix.shape[1]))
 
-        cm = cost_matrix.copy()
-        cm[~np.isfinite(cm)] = 1e6  # inf, nan 제거
-
-        det_indices, track_indices = linear_sum_assignment(cm)
+        det_indices, track_indices = linear_sum_assignment(cost_matrix)
 
         matches = []
         matched_det = set()

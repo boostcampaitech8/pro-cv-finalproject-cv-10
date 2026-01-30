@@ -150,4 +150,4 @@ async def test_report(image_id: str):
 
 if __name__ == "__main__":
     asyncio.run(main())
-    #asyncio.run(test_report("697b016b33c5f2eb9ba9a7ca"))  # 여기에 이미지 ID 입력
+    #asyncio.run(test_report("697c0c6bc7e48d53d77560f8"))  # 여기에 이미지 ID 입력

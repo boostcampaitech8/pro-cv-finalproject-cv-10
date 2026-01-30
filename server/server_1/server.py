@@ -23,8 +23,6 @@ from datetime import datetime
 SHARED_KEY = bytes.fromhex(os.environ.get("SHARED_KEY_HEX", "00"*32))  # 파일 암호화용
 SESSION_KEY = bytes.fromhex(os.environ.get("SESSION_KEY_HEX", "11"*32))  # 세션 인증용 (다른 키!)
 
-STORE_DIR = os.environ.get("STORE_DIR", "./store")
-os.makedirs(STORE_DIR, exist_ok=True)
 
 HEARTBEAT_TIMEOUT_SEC = int(os.environ.get("HEARTBEAT_TIMEOUT_SEC", "15"))
 WATCHDOG_PERIOD_SEC = float(os.environ.get("WATCHDOG_PERIOD_SEC", "1.0"))
@@ -42,8 +40,8 @@ DB_streaming  = DBManager(
     db_name = "streaming_service"
 )
 
-# Instance Selector 초기화
-selector = InstanceSelector(iou_thresh=0.2, data_dir="./store")
+#client
+Selector_per_Clients = dict()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -168,9 +166,9 @@ def worker_main(task_q):
         except Exception:
             traceback.print_exc()
 
-def upload_db_split(frame_files, num_workers=4):
-    data_dir = PyPath("./store")
-    selected_dir = PyPath("./selected_frames")
+def upload_db_split(frame_files,client_id,selector, num_workers=4):
+    data_dir = PyPath(f"./store/{client_id}")
+    selected_dir = PyPath(f"./selected_frames/{client_id}")
     print(selected_dir)
     to_save = selector.select_best_filenames(frame_files)
     print(to_save)
@@ -209,21 +207,24 @@ def upload_db_split(frame_files, num_workers=4):
         json_p = p.with_suffix(".json")
         json_p.unlink(missing_ok=True)
 
-def upload_frame(frame_file: str):
+def upload_frame(frame_file: str, client_id: str = ""):
     json_file = frame_file.replace(".jpg", ".json")
 
-    with open(os.path.join("./store", json_file), "r", encoding="utf-8") as f:
+    with open(os.path.join("./store", client_id, json_file), "r", encoding="utf-8") as f:
         meta = json.load(f)
-        r = DB_streaming.create(
-            created_at=(frame_file.split(".jpg")[0].split("@")[1]),
-            remote_file_path=f"images/{frame_file}",
-            location_name=meta.get("location", "unknown"),
-            client_id=json_file.split("@")[0],
-            metadata=meta,
-            current_file_path=os.path.join("./store", frame_file),
-            caption="",
-        )
-        
+        try:
+            r = DB_streaming.create(
+                created_at=(frame_file.split(".jpg")[0].split("@")[1]),
+                remote_file_path=f"images/{frame_file}",
+                location_name=meta.get("location", "unknown"),
+                client_id=json_file.split("@")[0],
+                metadata=meta,
+                current_file_path=os.path.join("./store",client_id, frame_file),
+                caption="",
+            )
+        except Exception as e:
+            print(f"DB insert error: {e}")
+            
 # ====== API 엔드포인트 ======
 @app.post("/heartbeat")
 async def heartbeat(client_id: str = Form(...), ts: str = Form(...), sig: str = Form(...)):
@@ -257,51 +258,6 @@ async def connection_state():
     }
 
 # ====== 이미지 업로드 및 다운로드 ======
-# AES-GCM 암호화된 이미지+json 업로드
-@app.post("/upload_image_enc", response_class=ORJSONResponse)
-async def upload_image_enc(
-    client_id: str = Form(...),
-    ts: str = Form(...),
-    sig: str = Form(...),  # HMAC 서명 추가
-    nonce: UploadFile = File(...),
-    ciphertext: UploadFile = File(...),
-):
-    """
-    Encrypted image+json 업로드.
-    sig = HMAC-SHA256((client_id:ts:nonce_bytes:ciphertext_bytes), SESSION_KEY)
-    """
-    try:
-        nonce_b = await nonce.read()
-        ct_b = await ciphertext.read()
-        
-        # HMAC 검증: nonce + ciphertext를 함께 서명
-        combined = nonce_b + ct_b
-        if not verify_hmac(client_id, ts, combined, sig, SESSION_KEY):
-            raise HTTPException(status_code=401, detail="Invalid signature")
-        
-        # 파일 암호화 복호화
-        payload = decrypt_payload(SHARED_KEY, nonce_b, ct_b, aad=b"img+json:v1")
-        image_bytes, json_bytes = unpack_two_files(payload)
-        meta = json.loads(json_bytes.decode("utf-8"))
-
-        image_id = str(uuid.uuid4())
-        curtime = datetime.now()
-        with open(os.path.join(STORE_DIR, f"{client_id}@{curtime}.jpg"), "wb") as f:
-            f.write(image_bytes)
-        with open(os.path.join(STORE_DIR, f"{client_id}@{curtime}.json"), "wb") as f:
-            f.write(json_bytes)
-        
-        # DB 및 S3 업로드
-        frame_files = sorted([p.name for p in selector.data_dir.glob("*.jpg")])
-        if len(frame_files) >= 10:
-            upload_db_split(frame_files, data_dir="./store", selected_dir="./selected_frames", num_workers=4)
-
-
-        return {"ok": True, "image_id": image_id, "client_id": client_id, "ts": ts, "meta_keys": list(meta.keys())}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"decrypt/unpack failed: {e}")
 
 # 평문 이미지+json 업로드
 @app.post("/upload_image", response_class=ORJSONResponse)
@@ -311,6 +267,9 @@ async def upload_image(
     sig: str = Form(...),  
     plaintext: UploadFile = File(...),
 ):
+    if client_id not in Selector_per_Clients:
+        Selector_per_Clients[client_id] = InstanceSelector(iou_thresh=0.2, data_dir=f"./store/{client_id}")
+    print(Selector_per_Clients)
     try:
         pt_b = await plaintext.read()
 
@@ -324,24 +283,34 @@ async def upload_image(
 
         image_id = str(uuid.uuid4())
         curtime = datetime.now()
-        with open(os.path.join(STORE_DIR, f"{client_id}@{curtime}.jpg"), "wb") as f:
+        current_dir = os.path.join("./store", f"{client_id}")
+        
+        os.makedirs(current_dir, exist_ok=True)
+        with open(os.path.join(current_dir, f"{client_id}@{curtime}.jpg"), "wb") as f:
             f.write(image_bytes)
-        with open(os.path.join(STORE_DIR, f"{client_id}@{curtime}.json"), "wb") as f:
+        with open(os.path.join(current_dir, f"{client_id}@{curtime}.json"), "wb") as f:
             f.write(json_bytes)
         
         # DB 및 S3 업로드
+        selector = Selector_per_Clients[client_id]
         frame_files = sorted([p.name for p in selector.data_dir.glob("*.jpg")])
-        upload_frame(frame_files[-1])  # 최신 프레임 업로드
+        upload_frame(frame_files[-1],client_id)  # 최신 프레임 업로드
         if len(frame_files) >= 10:
             try:
-                upload_db_split(frame_files, num_workers=4)
+                upload_db_split(
+                    frame_files = frame_files,
+                    client_id = client_id,
+                    selector = selector,
+                    num_workers=4)
             except Exception:
                 traceback.print_exc()
 
         return {"ok": True, "image_id": image_id, "client_id": client_id, "ts": ts, "meta_keys": list(meta.keys())}
-    except HTTPException:
-        raise
+    except HTTPException as e:
+        print("HTTPException caught:", e)
+        raise HTTPException(status_code=400, detail=f"decrypt/unpack failed: {e}")
     except Exception as e:
+        print("General exception caught:", e)
         raise HTTPException(status_code=400, detail=f"decrypt/unpack failed: {e}")
 
 

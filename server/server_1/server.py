@@ -372,7 +372,7 @@ async def report(
         # 이미지로부터..
         report["client_id"] = meta["client_id"]
         report["location_name"] = meta["location_name"]
-        report["time"] = meta["created_at"]
+        report["time"] = meta["updated_at"]
         return {"ok": True, "report": report}
     else:
         raise HTTPException(status_code=404, detail="This image has no caption")

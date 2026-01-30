@@ -125,7 +125,7 @@ def clova_report(caption: str) -> str:
             request_id='450573ae85b94325a5b2720e77eaa790'
         )
         caption = completion_executor.report(
-            caption=caption)
+            text=caption)
         return caption
     except Exception as e:
         return "Report generation failed. Maybe API Key error."
@@ -173,17 +173,16 @@ def worker_main(task_q):
                 caption="",
                 report="",
             )
-            print(f"now update, time: {time.time()}")
             caption = clova_caption(str(jpg_path), str(json_path))
             
-            report = clova_report(caption)
+            report = clova_report(caption)["result"]["message"]["content"]
             
             DB_selected.update_by_path(
                 remote_file_path=f"images/{jpg_path.name}",
                 caption=caption,
                 report=report
             )
-            print(f"updated! time: {time.time()}")
+            #print(f"updated! time: {time.time()}")
             #파일 삭제
             jpg_path.unlink(missing_ok=True)
             json_path.unlink(missing_ok=True)
@@ -193,15 +192,12 @@ def worker_main(task_q):
 def upload_db_split(frame_files,client_id,selector, num_workers=4):
     data_dir = PyPath(f"./store/{client_id}")
     selected_dir = PyPath(f"./selected_frames/{client_id}")
-    print(selected_dir)
     to_save = selector.select_best_filenames(frame_files)
-    print(to_save)
     if not to_save: return
     task_q = mp.Queue()
     procs = [mp.Process(target=worker_main, args=(task_q,)) for _ in range(num_workers)]
     for p in procs:
         p.start()
-    print(procs)
     try:
         for img_file in to_save:
             jpg_src = data_dir / img_file
@@ -293,7 +289,6 @@ async def upload_image(
 ):
     if client_id not in Selector_per_Clients:
         Selector_per_Clients[client_id] = InstanceSelector(iou_thresh=0.2, data_dir=f"./store/{client_id}")
-    print(Selector_per_Clients)
     try:
         pt_b = await plaintext.read()
 

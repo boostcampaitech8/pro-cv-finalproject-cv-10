@@ -5,7 +5,8 @@ from fastapi import FastAPI, Path, UploadFile, File, Form, HTTPException, Reques
 from fastapi.concurrency import asynccontextmanager
 from fastapi.responses import StreamingResponse, ORJSONResponse
 from utils.encrypt import encrypt_payload, decrypt_payload
-from utils.tracker import InstanceSelector
+#from utils.tracker import InstanceSelector
+from utils.tracker_bytetrack import ByteTrackAdvanced as InstanceSelector
 from utils.clova import CompletionExecutor
 
 import multiprocessing as mp
@@ -288,7 +289,7 @@ async def upload_image(
     plaintext: UploadFile = File(...),
 ):
     if client_id not in Selector_per_Clients:
-        Selector_per_Clients[client_id] = InstanceSelector(iou_thresh=0.2, data_dir=f"./store/{client_id}")
+        Selector_per_Clients[client_id] = InstanceSelector( data_dir=f"./store/{client_id}")
     try:
         pt_b = await plaintext.read()
 

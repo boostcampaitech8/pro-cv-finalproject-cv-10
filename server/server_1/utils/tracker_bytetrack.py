@@ -7,13 +7,14 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, field
 from scipy.optimize import linear_sum_assignment
 import warnings
+from .filter import KalmanFilter
 
 warnings.filterwarnings('ignore')
 
 
 @dataclass
 class Detection:
-    bbox: np.ndarray  # [x, y, x1, y1] format (TLBR)
+    bbox: np.ndarray  # [x, y, w, h] format 
     confidence: float
     class_id: int
     filename: str
@@ -21,68 +22,16 @@ class Detection:
     appearance_feat: Optional[np.ndarray] = None
     
     def get_area(self) -> float:
-        x, y, x1, y1 = self.bbox
-        return float((x1 - x) * (y1 - y))
+        x, y, w, h = self.bbox
+        return float(w * h)
     
     def get_center(self) -> np.ndarray:
-        x, y, x1, y1 = self.bbox
-        return np.array([(x + x1) / 2, (y + y1) / 2], dtype=np.float32)
+        x, y, w, h = self.bbox
+        return np.array([x + w / 2, y + h / 2], dtype=np.float32)
     
     def get_width_height(self) -> Tuple[float, float]:
-        x, y, x1, y1 = self.bbox
-        return float(x1 - x), float(y1 - y)
-
-
-class KalmanFilter:
-    """Kalman Filter - Motion 예측용"""
-    
-    def __init__(self, dt: float = 1.0):
-        self.dt = dt
-        self.x = None  # State: [x, y, vx, vy]
-        self.P = None  # Covariance matrix
-        self.Q = np.eye(4) * 0.1  # Process noise
-        self.R = np.eye(2) * 10.0  # Measurement noise
-    
-    def initialize(self, center: np.ndarray):
-        """중심 위치로 초기화"""
-        self.x = np.array([center[0], center[1], 0.0, 0.0], dtype=np.float32)
-        self.P = np.eye(4) * 100.0
-    
-    def predict(self) -> np.ndarray:
-        """다음 위치 예측"""
-        if self.x is None:
-            return None
-        
-        # State transition
-        F = np.array([
-            [1, 0, self.dt, 0],
-            [0, 1, 0, self.dt],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1]
-        ], dtype=np.float32)
-        
-        self.x = F @ self.x
-        self.P = F @ self.P @ F.T + self.Q
-        
-        return self.x[:2]  # Return predicted center
-    
-    def update(self, center: np.ndarray):
-        """관측값으로 업데이트"""
-        if self.x is None:
-            self.initialize(center)
-            return
-        
-        # Measurement update
-        z = center
-        H = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], dtype=np.float32)
-        
-        y = z - H @ self.x  # Residual
-        S = H @ self.P @ H.T + self.R
-        K = self.P @ H.T @ np.linalg.inv(S)
-        
-        self.x = self.x + K @ y
-        self.P = (np.eye(4) - K @ H) @ self.P
-
+        x, y, w, h = self.bbox
+        return float(w), float(h)
 
 @dataclass
 class Track:
@@ -109,13 +58,14 @@ class Track:
         else:
             self.kalman_filter.update(center)
     
+    
     def increment_age(self):
         self.time_since_update += 1
     
     def get_latest_detection(self) -> Optional[Detection]:
         return self.detections[-1] if self.detections else None
     
-    def get_best_detection(self, metric="area") -> Detection:
+    def get_best_detection(self, metric="confidence") -> Detection:
         if metric == "area":
             return max(self.detections, key=lambda d: d.get_area())
         elif metric == "confidence":
@@ -170,20 +120,20 @@ class ByteTrackAdvanced:
     
     @staticmethod
     def iou(box1: np.ndarray, box2: np.ndarray) -> float:
-        x1_min, y1_min, x1_max, y1_max = box1
-        x2_min, y2_min, x2_max, y2_max = box2
+        x1, y1, w, h = box1
+        x2, y2, w2, h2 = box2
         
-        inter_xmin = max(x1_min, x2_min)
-        inter_ymin = max(y1_min, y2_min)
-        inter_xmax = min(x1_max, x2_max)
-        inter_ymax = min(y1_max, y2_max)
+        inter_xmin = max(x1, x2)
+        inter_ymin = max(y1, y2)
+        inter_xmax = min(x1 + w, x2 + w2)
+        inter_ymax = min(y1 + h, y2 + h2)
         
         if inter_xmax <= inter_xmin or inter_ymax <= inter_ymin:
             return 0.0
         
         inter_area = (inter_xmax - inter_xmin) * (inter_ymax - inter_ymin)
-        area1 = (x1_max - x1_min) * (y1_max - y1_min)
-        area2 = (x2_max - x2_min) * (y2_max - y2_min)
+        area1 = w * h
+        area2 = w2 * h2
         union_area = area1 + area2 - inter_area
         
         return float(inter_area / union_area) if union_area > 0 else 0.0
@@ -266,31 +216,27 @@ class ByteTrackAdvanced:
         
         return cost_matrix
     
-    def _hungarian_matching(
-        self,
-        cost_matrix: np.ndarray,
-        max_cost: float = 0.7,
-    ) -> Tuple[List[Tuple[int, int]], List[int], List[int]]:
-        """Hungarian Algorithm 기반 최적 매칭"""
+    def _hungarian_matching(self, cost_matrix: np.ndarray, max_cost: float = 0.7):
         if cost_matrix.size == 0:
-            return [], [], []
-        
-        # Hungarian algorithm
-        det_indices, track_indices = linear_sum_assignment(cost_matrix)
-        
+            return [], list(range(cost_matrix.shape[0])), list(range(cost_matrix.shape[1]))
+
+        cm = cost_matrix.copy()
+        cm[~np.isfinite(cm)] = 1e6  # inf, nan 제거
+
+        det_indices, track_indices = linear_sum_assignment(cm)
+
         matches = []
         matched_det = set()
         matched_track = set()
-        
+
         for d_idx, t_idx in zip(det_indices, track_indices):
             if cost_matrix[d_idx, t_idx] < max_cost:
                 matches.append((d_idx, t_idx))
                 matched_det.add(d_idx)
                 matched_track.add(t_idx)
-        
+
         unmatched_det = [i for i in range(cost_matrix.shape[0]) if i not in matched_det]
         unmatched_track = [i for i in range(cost_matrix.shape[1]) if i not in matched_track]
-        
         return matches, unmatched_det, unmatched_track
     
     def _load_frame_detections(
@@ -307,7 +253,7 @@ class ByteTrackAdvanced:
             
             try:
                 with open(json_path, "r", encoding="utf-8") as f:
-                    anno = json.load(f)
+                    anno = json.load(f)["annotations"]
             except Exception as e:
                 print(f"Error loading {json_path}: {e}")
                 frame_detections.append([])
@@ -315,7 +261,8 @@ class ByteTrackAdvanced:
             
             detections = []
             for ann in anno:
-                bbox = ann.get("bbox_xyxy", [])
+
+                bbox = ann.get("bbox", [])
                 
                 bbox_tlbr = np.array(bbox, dtype=np.float32)
 
@@ -337,11 +284,10 @@ class ByteTrackAdvanced:
     
     def update(self, frame_detections: List[List[Detection]]):
         """ByteTrack 업데이트 (Hungarian Algorithm 사용)"""
-        
+
         for frame_idx, detections in enumerate(frame_detections):
             high_conf_dets = [d for d in detections if d.confidence >= self.confidence_thresh]
             low_conf_dets = [d for d in detections if d.confidence < self.confidence_thresh]
-            
             active_tracks = [
                 t for t in self.tracks.values() if t.time_since_update < self.max_age
             ]
@@ -376,8 +322,7 @@ class ByteTrackAdvanced:
             
             for d_idx, t_idx in matches_low:
                 confirmed_tracks[t_idx].add_detection(low_conf_dets[d_idx])
-            
-            # Step 3: Age 관리
+
             for track_id, track in list(self.tracks.items()):
                 if track.time_since_update == 0:
                     continue
@@ -386,60 +331,18 @@ class ByteTrackAdvanced:
                 if track.time_since_update > self.max_age:
                     del self.tracks[track_id]
     
-    def _greedy_matching(
-        self,
-        detections: List[Detection],
-        tracks: List[Track],
-        iou_thresh: float,
-    ) -> Tuple[List[Tuple[int, int]], List[int], List[int]]:
-        """Greedy matching (Hungarian이 없을 때)"""
-        if len(detections) == 0 or len(tracks) == 0:
-            return [], list(range(len(detections))), list(range(len(tracks)))
-        
-        iou_matrix = np.zeros((len(detections), len(tracks)), dtype=np.float32)
-        
-        for d_idx, detection in enumerate(detections):
-            for t_idx, track in enumerate(tracks):
-                latest_det = track.get_latest_detection()
-                if latest_det:
-                    iou_matrix[d_idx, t_idx] = self.iou(detection.bbox, latest_det.bbox)
-        
-        matched_detections = set()
-        matched_tracks = set()
-        matches = []
-        
-        iou_flat = iou_matrix.reshape(-1)
-        sorted_indices = np.argsort(-iou_flat)
-        
-        for idx in sorted_indices:
-            d_idx = idx // len(tracks)
-            t_idx = idx % len(tracks)
-            
-            if d_idx in matched_detections or t_idx in matched_tracks:
-                continue
-            
-            if iou_matrix[d_idx, t_idx] < iou_thresh:
-                break
-            
-            matches.append((d_idx, t_idx))
-            matched_detections.add(d_idx)
-            matched_tracks.add(t_idx)
-        
-        unmatched_det = [i for i in range(len(detections)) if i not in matched_detections]
-        unmatched_track = [i for i in range(len(tracks)) if i not in matched_tracks]
-        
-        return matches, unmatched_det, unmatched_track
     
     def select_best_filenames(self, frame_filenames: List[str]) -> List[str]:
         frame_detections = self._load_frame_detections(frame_filenames)
+
         self.update(frame_detections)
+
         
         selected = []
         for track_id, track in sorted(self.tracks.items()):
             if len(track.detections) == 0:
                 continue
-            
-            best_det = track.get_best_detection(metric="area")
+            best_det = track.get_best_detection(metric="confidence")
             selected.append(best_det.filename)
         
         unique_files = list(dict.fromkeys(selected))
@@ -451,7 +354,7 @@ class ByteTrackAdvanced:
             if len(track.detections) == 0:
                 continue
             
-            best_det = track.get_best_detection(metric="area")
+            best_det = track.get_best_detection(metric="confidence")
             velocity = track.get_velocity()
             
             summary[track_id] = {
@@ -476,7 +379,7 @@ def main():
     print("=" * 80)
     
     selector = ByteTrackAdvanced(
-        data_dir="./samples",
+        data_dir="../samples",
         iou_thresh_high=0.3,
         iou_thresh_low=0.1,
         confidence_thresh=0.5,

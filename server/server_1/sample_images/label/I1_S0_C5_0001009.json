@@ -1,0 +1,48 @@
+{
+  "meta": {
+    "date": "2024-08-20",
+    "time": 0,
+    "location": 1,
+    "spot": 14,
+    "sensor": 0,
+    "equipment": 1,
+    "weather": [
+      31.8,
+      182,
+      2.5,
+      0,
+      1008.7,
+      1009.6,
+      76
+    ],
+    "scenario": 1,
+    "radar": [],
+    "dataset": "군 경계 작전 환경 내 인식 데이터",
+    "license": "자체수집"
+  },
+  "annotations": [
+    {
+      "filename": "I1_S0_C5_0001011.jpg",
+      "width": 1920,
+      "height": 1080,
+      "caption": "8월 맑은 날씨의 낮 바다에 어선 한 척이 파도를 일으키며 이동하는 중이다.",
+      "kind": "0",
+      "class": "0",
+      "bbox": [
+        117.0,
+        252.0,
+        33.0,
+        7.0
+      ],
+      "area": 231.0
+    }
+  ],
+  "original_image_size": {
+    "width": 1920,
+    "height": 1080
+  },
+  "split_info": {
+    "original_stem": "I1_S0_C5_0001011",
+    "resized_to": "640x360"
+  }
+}

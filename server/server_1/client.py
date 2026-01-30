@@ -136,6 +136,18 @@ async def main():
         stop_event.set()
         hb_task.cancel()
         await client.aclose()
+        
+async def test_report(image_id: str):
+    ts = str(time.time())
+    sig = compute_hmac(CLIENT_ID, ts, image_id.encode(), SESSION_KEY)
+    resp = await request_with_retry(
+        "POST",
+        "/report",
+        data={"client_id": CLIENT_ID, "ts": ts, "sig": sig, "image_id": image_id}
+    )
+
+    print("report:", resp.json())
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    #asyncio.run(main())
+    asyncio.run(test_report("697b016b33c5f2eb9ba9a7ca"))  # 여기에 이미지 ID 입력

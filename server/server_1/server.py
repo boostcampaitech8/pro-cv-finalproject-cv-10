@@ -344,6 +344,36 @@ async def upload_image(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"decrypt/unpack failed: {e}")
 
+
+
+@app.post("/report")
+async def report(
+            client_id: str = Form(...),
+            ts: str = Form(...),
+            sig: str = Form(...),  
+            image_id: str = Form(...),
+):
+    # 검증
+    if not verify_hmac(client_id, ts, image_id.encode(), sig, SESSION_KEY):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+    
+    meta = DB_selected.read_by_id(image_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="Image ID not found")
+    caption = meta["caption"]
+    if caption is not None:
+        
+        completion_executor = CompletionExecutor(
+            host='https://clovastudio.stream.ntruss.com',
+            api_key=os.getenv('CLOVA_API_KEY', ""),
+            request_id='450573ae85b94325a5b2720e77eaa790'
+        )
+        report = completion_executor.report(text = caption)
+        return {"ok": True, "report": report}
+    else:
+        raise HTTPException(status_code=404, detail="This image has no caption")
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8443, ssl_certfile="cert.pem", ssl_keyfile="key.pem")
+    uvicorn.run(app, host="0.0.0.0", port=8000, ssl_certfile="cert.pem", ssl_keyfile="key.pem")

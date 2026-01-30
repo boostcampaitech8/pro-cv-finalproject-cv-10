@@ -1,0 +1,22 @@
+{
+  "annotations": [
+    {
+      "filename": "I1_S0_C5_0001006.jpg",
+      "width": 1920,
+      "height": 1080,
+      "caption": "8월 맑은 날씨의 낮 바다에 어선 한 척이 떠 가고 있다.",
+      "kind": "0",
+      "class": "0",
+      "bbox": [
+        67.33333333333333,
+        250.33333333333331,
+        31.0,
+        7.0
+      ],
+      "area": 217.0,
+      "instance_id": 3,
+      "quality_score": 217.0,
+      "appeared_frames": 1
+    }
+  ]
+}

@@ -130,7 +130,7 @@ class CompletionExecutor:
                 }
                 }
             }
-        response = requests.post(self._host + '/v3/api-tools/chat-tokenize/HCX-007',
+        response = requests.post(self._host + '/v3/chat-completions/HCX-007',
                                 headers=headers,
                                 data= json.dumps(data),
                                 stream=True)

@@ -93,6 +93,7 @@ class DBManager:
 
         
         return str(result.inserted_id)
+  
     
     # =================== READ ===================
     # 모든 파일 메타데이터 조회
@@ -136,6 +137,14 @@ class DBManager:
             images.append(img)
         return images
     
+        # client id로 상태 조회
+    def get_client_status(self, client_id: str) -> Dict:
+        return self.client_status_collection.find_one({"client_id": client_id})
+
+    # 모든 클라이언트 상태 조회
+    def get_all_client_status(self) -> List[Dict]:
+        return list(self.client_status_collection.find().sort("updated_at", -1))
+
     # =================== UPDATE ===================
     # 파일 메타데이터 수정
     # ID로 수정
@@ -162,7 +171,22 @@ class DBManager:
             {"$set": update_data}
         )
         return result.modified_count
-    
+        # client id를 받아서 상태 저장
+        
+    def set_client_status(self, client_id: str, status: bool) -> bool:
+        self.client_status_collection.update_one(
+            {"client_id": client_id},
+            {
+                "$set": {
+                    "client_id": client_id,
+                    "status": status,
+                    "updated_at": datetime.utcnow()
+                }
+            },
+            upsert=True  # 없으면 생성, 있으면 업데이트
+        )
+        return True
+
     # =================== DELETE ===================
     
     # 경로로 삭제
@@ -190,28 +214,7 @@ class DBManager:
         return result.deleted_count
 
 
-    # client id를 받아서 상태 저장
-    def set_client_status(self, client_id: str, status: bool) -> bool:
-        self.client_status_collection.update_one(
-            {"client_id": client_id},
-            {
-                "$set": {
-                    "client_id": client_id,
-                    "status": status,
-                    "updated_at": datetime.utcnow()
-                }
-            },
-            upsert=True  # 없으면 생성, 있으면 업데이트
-        )
-        return True
 
-    # client id로 상태 조회
-    def get_client_status(self, client_id: str) -> Dict:
-        return self.client_status_collection.find_one({"client_id": client_id})
-
-    # 모든 클라이언트 상태 조회
-    def get_all_client_status(self) -> List[Dict]:
-        return list(self.client_status_collection.find().sort("updated_at", -1))
 
     # client id로 상태 삭제
     def delete_client_status(self, client_id: str) -> int:

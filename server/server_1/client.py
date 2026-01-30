@@ -1,8 +1,7 @@
 import os, json, time, asyncio, hmac, hashlib
-from fastapi import requests
 import httpx
 from utils.encrypt import encrypt_payload, decrypt_payload
-
+from utils.utils import compute_hmac
 # ngrok 가입 후,ngrok config add-authtoken <your_token> 입력.
 # uvicorn server:app --host 0.0.0.0 --port 8000
 # ngrok http 8000 후
@@ -28,11 +27,6 @@ client = httpx.AsyncClient(
 )
 
 stop_event = asyncio.Event()
-
-def compute_hmac(client_id: str, ts: str, body: bytes, key: bytes) -> str:
-    """서버와 동일한 HMAC 계산"""
-    msg = f"{client_id}:{ts}".encode() + b":" + body
-    return hmac.new(key, msg, hashlib.sha256).hexdigest()
 
 async def request_with_retry(method: str, url: str, *, max_retry=999999, **kwargs):
     backoff = 1.0

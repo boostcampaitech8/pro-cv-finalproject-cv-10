@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse, ORJSONResponse
 from utils.encrypt import encrypt_payload, decrypt_payload
 #from utils.tracker import InstanceSelector
 from utils.tracker_bytetrack import ByteTrackAdvanced as InstanceSelector
-from utils.clova import CompletionExecutor
+from utils.clova import CompletionExecutor, clova_caption, clova_report
 
 import multiprocessing as mp
 
@@ -15,6 +15,7 @@ from pathlib import Path as PyPath
 
 from db.manager import DBManager
 from datetime import datetime
+from utils.utils import verify_hmac, unpack_two_files
 
 # ====== USAGE ======
 # uvicorn server:app --host 0.0.0.0 --port 8000
@@ -66,34 +67,6 @@ STATE = {} # 전역 상태 객체
 def _now() -> float:
     return time.time()
 
-def compute_hmac(client_id: str, ts: str, body: bytes, key: bytes) -> str:
-    """HMAC 계산"""
-    msg = f"{client_id}:{ts}".encode() + b":" + body
-    return hmac.new(key, msg, hashlib.sha256).hexdigest()
-
-
-def verify_hmac(client_id: str, ts: str, body: bytes, received_sig: str, key: bytes) -> bool:
-    computed_sig = compute_hmac(client_id, ts, body, key)
-    return hmac.compare_digest(computed_sig, received_sig)
-
-# ====== 유틸 함수 ======
-def pack_image_json(meta: Dict[str, Any], image_bytes: bytes) -> bytes:
-    meta_bytes = json.dumps(meta, ensure_ascii=False).encode("utf-8")
-    return meta_bytes + b"\n" + image_bytes
-
-def unpack_image_json(payload: bytes):
-    i = payload.find(b"\n")
-    if i < 0:
-        raise ValueError("Invalid payload: missing delimiter")
-    meta = json.loads(payload[:i].decode("utf-8"))
-    img = payload[i+1:]
-    return meta, img
-
-def unpack_two_files(payload: bytes) -> tuple[bytes, bytes]:
-    n = int.from_bytes(payload[:8], "big")
-    json_bytes = payload[8:8+n]
-    image_bytes = payload[8+n:]
-    return image_bytes, json_bytes
 
 async def watchdog_loop():
     while True:
@@ -102,36 +75,6 @@ async def watchdog_loop():
             if _now() - state.last_seen_ts > HEARTBEAT_TIMEOUT_SEC:
                 STATE[client_id].is_connected = False
                 DB_streaming.set_client_status(client_id, False)
-
-def clova_caption(image_path: str, json_path: str) -> str:
-    try:
-        completion_executor = CompletionExecutor(
-            host='https://clovastudio.stream.ntruss.com',
-            api_key=os.getenv('CLOVA_API_KEY', ""),
-            request_id='450573ae85b94325a5b2720e77eaa790'
-        )
-        caption = completion_executor.image_caption(
-            image_path=image_path,
-            json_path=json_path)
-        return caption
-    except Exception as e:
-        return "Caption generation failed. Maybe API Key error."
-
-
-def clova_report(caption: str) -> str:
-    try:
-        completion_executor = CompletionExecutor(
-            host='https://clovastudio.stream.ntruss.com',
-            api_key=os.getenv('CLOVA_API_KEY', ""),
-            request_id='450573ae85b94325a5b2720e77eaa790'
-        )
-        caption = completion_executor.report(
-            text=caption)
-        return caption
-    except Exception as e:
-        return "Report generation failed. Maybe API Key error."
-
-
 ## multiprocessing 업로드 헬퍼 함수
 def stage_pair(jpg_src: Path, json_src: Path, selected_dir: Path ):
     # selected_dir=None이면 스테이징 없이 원본 경로 그대로 사용
@@ -333,8 +276,6 @@ async def upload_image(
         print("General exception caught:", e)
         raise HTTPException(status_code=400, detail=f"decrypt/unpack failed: {e}")
 
-
-
 @app.post("/report")
 async def report(
             client_id: str = Form(...),
@@ -365,7 +306,6 @@ async def report(
         return {"ok": True, "report": report}
     else:
         raise HTTPException(status_code=404, detail="This image has no caption")
-
 
 if __name__ == "__main__":
     import uvicorn

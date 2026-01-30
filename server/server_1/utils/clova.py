@@ -136,6 +136,38 @@ class CompletionExecutor:
                                 stream=True)
         return json.loads(response.text)
 
+
+def clova_caption(image_path: str, json_path: str) -> str:
+    try:
+        completion_executor = CompletionExecutor(
+            host='https://clovastudio.stream.ntruss.com',
+            api_key=os.getenv('CLOVA_API_KEY', ""),
+            request_id='450573ae85b94325a5b2720e77eaa790'
+        )
+        caption = completion_executor.image_caption(
+            image_path=image_path,
+            json_path=json_path)
+        return caption
+    except Exception as e:
+        return "Caption generation failed. Maybe API Key error."
+
+
+def clova_report(caption: str) -> str:
+    try:
+        completion_executor = CompletionExecutor(
+            host='https://clovastudio.stream.ntruss.com',
+            api_key=os.getenv('CLOVA_API_KEY', ""),
+            request_id='450573ae85b94325a5b2720e77eaa790'
+        )
+        caption = completion_executor.report(
+            text=caption)
+        return caption
+    except Exception as e:
+        return "Report generation failed. Maybe API Key error."
+
+
+
+
 if __name__ == '__main__':
     completion_executor = CompletionExecutor(
         host=HOST,

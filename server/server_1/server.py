@@ -4,9 +4,9 @@ from typing import Dict, Any, Optional
 from fastapi import FastAPI, Path, UploadFile, File, Form, HTTPException, Request
 from fastapi.concurrency import asynccontextmanager
 from fastapi.responses import StreamingResponse, ORJSONResponse
-from lib.encrypt import encrypt_payload, decrypt_payload
-from lib.tracker import InstanceSelector
-from lib.clova import CompletionExecutor
+from utils.encrypt import encrypt_payload, decrypt_payload
+from utils.tracker import InstanceSelector
+from utils.clova import CompletionExecutor
 
 import multiprocessing as mp
 

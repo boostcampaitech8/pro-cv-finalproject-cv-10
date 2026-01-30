@@ -73,6 +73,7 @@ class DBManager:
                client_id: str,
                metadata: Dict = None,
                caption: str = "",
+               report: str = "",
                event: bool = False,
                current_file_path: str = None) -> str:
 
@@ -85,6 +86,7 @@ class DBManager:
             "metadata": metadata or {},
             "updated_at": datetime.utcnow(),
             "caption": caption,
+            "report": report,
             "event": event
         }
         # S3

@@ -117,6 +117,20 @@ def clova_caption(image_path: str, json_path: str) -> str:
         return "Caption generation failed. Maybe API Key error."
 
 
+def clova_report(caption: str) -> str:
+    try:
+        completion_executor = CompletionExecutor(
+            host='https://clovastudio.stream.ntruss.com',
+            api_key=os.getenv('CLOVA_API_KEY', ""),
+            request_id='450573ae85b94325a5b2720e77eaa790'
+        )
+        caption = completion_executor.report(
+            caption=caption)
+        return caption
+    except Exception as e:
+        return "Report generation failed. Maybe API Key error."
+
+
 ## multiprocessing 업로드 헬퍼 함수
 def stage_pair(jpg_src: Path, json_src: Path, selected_dir: Path ):
     # selected_dir=None이면 스테이징 없이 원본 경로 그대로 사용
@@ -146,7 +160,6 @@ def worker_main(task_q):
         try:
             jpg_path, json_path = PyPath(item[0]), PyPath(item[1])
             
-            
             with open(json_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)
                 
@@ -158,13 +171,17 @@ def worker_main(task_q):
                 metadata=meta,
                 current_file_path=str(jpg_path),
                 caption="",
+                report="",
             )
             print(f"now update, time: {time.time()}")
             caption = clova_caption(str(jpg_path), str(json_path))
             
+            report = clova_report(caption)
+            
             DB_selected.update_by_path(
                 remote_file_path=f"images/{jpg_path.name}",
-                caption=caption
+                caption=caption,
+                report=report
             )
             print(f"updated! time: {time.time()}")
             #파일 삭제

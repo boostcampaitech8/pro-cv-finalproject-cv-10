@@ -105,15 +105,18 @@ async def watchdog_loop():
                 DB_streaming.set_client_status(client_id, False)
 
 def clova_caption(image_path: str, json_path: str) -> str:
-    completion_executor = CompletionExecutor(
-        host='https://clovastudio.stream.ntruss.com',
-        api_key=os.getenv('CLOVA_API_KEY', ""),
-        request_id='450573ae85b94325a5b2720e77eaa790'
-    )
-    caption = completion_executor.execute(
-        image_path=image_path,
-        json_path=json_path)
-    return caption
+    try:
+        completion_executor = CompletionExecutor(
+            host='https://clovastudio.stream.ntruss.com',
+            api_key=os.getenv('CLOVA_API_KEY', ""),
+            request_id='450573ae85b94325a5b2720e77eaa790'
+        )
+        caption = completion_executor.execute(
+            image_path=image_path,
+            json_path=json_path)
+        return caption
+    except Exception as e:
+        return "Caption generation failed. Maybe API Key error."
 
 
 ## multiprocessing 업로드 헬퍼 함수
@@ -132,7 +135,6 @@ def stage_pair(jpg_src: Path, json_src: Path, selected_dir: Path ):
     shutil.copy2(jpg_src, jpg_tmp)
     shutil.copy2(json_src, json_tmp)
 
-    # os.replace는 목적지를 원자적으로 교체(스테이징 커밋에 유리) 
     os.replace(jpg_tmp, jpg_final)
     os.replace(json_tmp, json_final)
 

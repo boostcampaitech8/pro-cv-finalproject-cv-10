@@ -145,12 +145,11 @@ def worker_main(task_q):
             break
         try:
             jpg_path, json_path = PyPath(item[0]), PyPath(item[1])
-
-            caption = clova_caption(str(jpg_path), str(json_path))
-
+            
+            
             with open(json_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)
-
+                
             DB_selected.create(
                 created_at=jpg_path.stem.split("@")[1],
                 remote_file_path=f"images/{jpg_path.name}",
@@ -158,8 +157,16 @@ def worker_main(task_q):
                 client_id=json_path.name.split("@")[0],
                 metadata=meta,
                 current_file_path=str(jpg_path),
-                caption=caption,
+                caption="",
             )
+            print(f"now update, time: {time.time()}")
+            caption = clova_caption(str(jpg_path), str(json_path))
+            
+            DB_selected.update_by_path(
+                remote_file_path=f"images/{jpg_path.name}",
+                caption=caption
+            )
+            print(f"updated! time: {time.time()}")
             #파일 삭제
             jpg_path.unlink(missing_ok=True)
             json_path.unlink(missing_ok=True)

@@ -154,7 +154,7 @@ def worker_main(task_q):
                 meta = json.load(f)
 
             DB_selected.create(
-                created_at=jpg_path.stem,
+                created_at=jpg_path.stem.split("@")[1],
                 remote_file_path=f"images/{jpg_path.name}",
                 location_name=meta.get("location", "unknown"),
                 client_id=json_path.name.split("@")[0],
@@ -215,7 +215,7 @@ def upload_frame(frame_file: str):
     with open(os.path.join("./store", json_file), "r", encoding="utf-8") as f:
         meta = json.load(f)
         r = DB_streaming.create(
-            created_at=frame_file.split(".jpg")[0],
+            created_at=(frame_file.split(".jpg")[0].split("@")[1]),
             remote_file_path=f"images/{frame_file}",
             location_name=meta.get("location", "unknown"),
             client_id=json_file.split("@")[0],
@@ -369,6 +369,10 @@ async def report(
             request_id='450573ae85b94325a5b2720e77eaa790'
         )
         report = completion_executor.report(text = caption)
+        # 이미지로부터..
+        report["client_id"] = meta["client_id"]
+        report["location_name"] = meta["location_name"]
+        report["time"] = meta["created_at"]
         return {"ok": True, "report": report}
     else:
         raise HTTPException(status_code=404, detail="This image has no caption")

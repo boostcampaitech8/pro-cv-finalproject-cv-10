@@ -114,12 +114,13 @@ async def main():
     hb_task = asyncio.create_task(heartbeat_loop())
 
     try:
-        for i in range(10):
-            resp = await upload_image_and_json(
-                f"./samples/img/frame_0{i}.jpg",
-                f"./samples/label/frame_0{i}.json",
-            )
-            print("uploaded:", resp)
+        for _ in range(10):
+            for i in range(10):
+                resp = await upload_image_and_json(
+                    f"./samples/img/frame_0{i}.jpg",
+                    f"./samples/label/frame_0{i}.json",
+                )
+                print("uploaded:", resp)
         while True:
             print("heartbeat running...")
             await asyncio.sleep(10)

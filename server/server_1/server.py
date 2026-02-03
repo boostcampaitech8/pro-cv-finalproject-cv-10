@@ -1,14 +1,13 @@
 import traceback
-import os, time, json, asyncio, uuid, hmac, hashlib, shutil
-from typing import Dict, Any, Optional
-from fastapi import FastAPI, Path, UploadFile, File, Form, HTTPException, Request
+import os, time, json, asyncio, uuid, shutil
+from typing import Optional
+from fastapi import FastAPI, Path, UploadFile, File, Form, HTTPException
 from fastapi.concurrency import asynccontextmanager
-from fastapi.responses import StreamingResponse, ORJSONResponse
-from utils.encrypt import encrypt_payload, decrypt_payload
-#from utils.tracker import InstanceSelector
+from fastapi.responses import ORJSONResponse
 from utils.tracker_bytetrack import ByteTrackAdvanced as InstanceSelector
 from utils.clova import CompletionExecutor, clova_caption, clova_report
-
+import errno
+from pymongo.errors import DuplicateKeyError
 import multiprocessing as mp
 
 from pathlib import Path as PyPath
@@ -23,7 +22,7 @@ from utils.utils import verify_hmac, unpack_two_files
 
 # ====== 설정 ======
 SHARED_KEY = bytes.fromhex(os.environ.get("SHARED_KEY_HEX", "00"*32))  # 파일 암호화용
-SESSION_KEY = bytes.fromhex(os.environ.get("SESSION_KEY_HEX", "11"*32))  # 세션 인증용 (다른 키!)
+SESSION_KEY = bytes.fromhex(os.environ.get("SESSION_KEY_HEX", "11"*32))  # 세션 인증용 
 
 
 HEARTBEAT_TIMEOUT_SEC = int(os.environ.get("HEARTBEAT_TIMEOUT_SEC", "15"))
@@ -64,110 +63,153 @@ class ConnectionState:
 
 STATE = {} # 전역 상태 객체
 
-def _now() -> float:
-    return time.time()
+
 
 
 async def watchdog_loop():
     while True:
         await asyncio.sleep(WATCHDOG_PERIOD_SEC)
         for client_id, state in STATE.items():
-            if _now() - state.last_seen_ts > HEARTBEAT_TIMEOUT_SEC:
+            if time.time() - state.last_seen_ts > HEARTBEAT_TIMEOUT_SEC:
                 STATE[client_id].is_connected = False
                 DB_streaming.set_client_status(client_id, False)
+                DB_selected.set_client_status(client_id, False)
+                
+def purge_store_dir(data_dir: PyPath, cutoff_ts: float):
+    for p in data_dir.glob("*"):
+        if p.suffix not in (".jpg", ".json"):
+            continue
+        try:
+            if p.stat().st_mtime <= cutoff_ts:
+                p.unlink(missing_ok=True)
+        except FileNotFoundError:
+            pass
+        
 ## multiprocessing 업로드 헬퍼 함수
-def stage_pair(jpg_src: Path, json_src: Path, selected_dir: Path ):
-    # selected_dir=None이면 스테이징 없이 원본 경로 그대로 사용
+def stage_pair(jpg_src: PyPath, json_src: PyPath, selected_dir: Optional[PyPath]):
     if selected_dir is None:
         return jpg_src, json_src
 
     selected_dir.mkdir(parents=True, exist_ok=True)
     jpg_final = selected_dir / jpg_src.name
     json_final = selected_dir / json_src.name
+    lock_path = selected_dir / (jpg_src.name + ".lock")
 
-    jpg_tmp = selected_dir / (jpg_src.name + ".tmp") #임시 파일
-    json_tmp = selected_dir / (json_src.name + ".tmp") #임시 파일
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+    except OSError as e:
+        if e.errno == errno.EEXIST:
+            return None
+        raise
 
-    shutil.copy2(jpg_src, jpg_tmp)
-    shutil.copy2(json_src, json_tmp)
+    try:
+        if not jpg_src.exists() or not json_src.exists():
+            return None
 
-    os.replace(jpg_tmp, jpg_final)
-    os.replace(json_tmp, json_final)
-
-    return jpg_final, json_final
+        os.replace(str(jpg_src), str(jpg_final))
+        os.replace(str(json_src), str(json_final))
+        return jpg_final, json_final
+    finally:
+        lock_path.unlink(missing_ok=True)
 
 def worker_main(task_q):
+    db = DBManager(uri=URI, db_name="selected_object_caption")
+
     while True:
         item = task_q.get()
-        if item is None:   # sentinel로 종료 
+        if item is None:
             break
+
+        jpg_path = json_path = None
         try:
             jpg_path, json_path = PyPath(item[0]), PyPath(item[1])
-            
+
             with open(json_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)
-                
-            DB_selected.create(
-                created_at=jpg_path.stem.split("@")[1],
-                remote_file_path=f"images/{jpg_path.name}",
-                location_name=meta.get("location", "unknown"),
-                client_id=json_path.name.split("@")[0],
-                metadata=meta,
-                current_file_path=str(jpg_path),
-                caption="",
-                report="",
-            )
+
+            try:
+                db.create(
+                    created_at=jpg_path.stem.split("@")[1],
+                    remote_file_path=f"images/{jpg_path.name}",
+                    location_name=meta.get("location", "unknown"),
+                    client_id=json_path.name.split("@")[0],
+                    metadata=meta,
+                    current_file_path=str(jpg_path),
+                    caption="",
+                    report="",
+                )
+            except Exception as e:
+                if isinstance(e, DuplicateKeyError) or ("E11000" in str(e)):
+                    jpg_path.unlink(missing_ok=True)
+                    json_path.unlink(missing_ok=True)
+                    continue
+                raise
+
             caption = clova_caption(str(jpg_path), str(json_path))
-            
             report = clova_report(caption)["result"]["message"]["content"]
-            
-            DB_selected.update_by_path(
+
+            db.update_by_path(
                 remote_file_path=f"images/{jpg_path.name}",
                 caption=caption,
                 report=report
             )
-            #print(f"updated! time: {time.time()}")
-            #파일 삭제
+
             jpg_path.unlink(missing_ok=True)
             json_path.unlink(missing_ok=True)
-        except Exception:
-            traceback.print_exc()
 
-def upload_db_split(frame_files,client_id,selector, num_workers=4):
+        except Exception:
+            if jpg_path: jpg_path.unlink(missing_ok=True)
+            if json_path: json_path.unlink(missing_ok=True)
+            traceback.print_exc()
+            
+# --- upload_db_split 교체/수정: 끝나면 store 비우고 selector reset ---
+def upload_db_split(frame_files, client_id, selector, num_workers=4):
     data_dir = PyPath(f"./store/{client_id}")
     selected_dir = PyPath(f"./selected_frames/{client_id}")
+    cutoff_ts = time.time()
+
     to_save = selector.select_best_filenames(frame_files)
-    if not to_save: return
+    if not to_save:
+        selector.tracks.clear()
+        selector.next_track_id = 0
+        purge_store_dir(data_dir, cutoff_ts)
+        return
+
     task_q = mp.Queue()
     procs = [mp.Process(target=worker_main, args=(task_q,)) for _ in range(num_workers)]
     for p in procs:
         p.start()
+
     try:
         for img_file in to_save:
             jpg_src = data_dir / img_file
             json_src = data_dir / img_file.replace(".jpg", ".json")
 
-            jpg_path, json_path = stage_pair(jpg_src, json_src, selected_dir)
-            task_q.put((str(jpg_path), str(json_path)))
-    except Exception:
-        traceback.print_exc() 
+            staged = stage_pair(jpg_src, json_src, selected_dir)
+            if staged is None:
+                continue
 
+            jpg_path, json_path = staged
+            task_q.put((str(jpg_path), str(json_path)))
+
+    except Exception:
+        traceback.print_exc()
     finally:
         for _ in procs:
-            task_q.put(None)  # 종료 신호 
+            task_q.put(None)
         for p in procs:
             p.join()
+
+        selector.tracks.clear()
+        selector.next_track_id = 0
+        purge_store_dir(data_dir, cutoff_ts)
     
     # 폴더에서, "맨 뒤 5프레임" 제외 삭제
     data_dir = selector.data_dir
     jpg_paths = sorted(data_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime)
-    keep_set = set(p.name for p in jpg_paths[-5:])  
     for p in jpg_paths:
-        if p.name in keep_set:
-            continue
-        # jpg 삭제
         p.unlink(missing_ok=True)
-        # 매칭 json 삭제
         json_p = p.with_suffix(".json")
         json_p.unlink(missing_ok=True)
 
@@ -203,9 +245,9 @@ async def heartbeat(client_id: str = Form(...), ts: str = Form(...), sig: str = 
     if client_id not in STATE:
         STATE[client_id] = ConnectionState()
         STATE[client_id].is_connected = True
-        STATE[client_id].last_seen_ts = _now()
+        STATE[client_id].last_seen_ts = time.time()
     else:
-        STATE[client_id].last_seen_ts = _now()
+        STATE[client_id].last_seen_ts = time.time()
         STATE[client_id].is_connected = True
     
     DB_streaming.set_client_status(client_id, True)
@@ -257,14 +299,14 @@ async def upload_image(
         # DB 및 S3 업로드
         selector = Selector_per_Clients[client_id]
         frame_files = sorted([p.name for p in selector.data_dir.glob("*.jpg")])
-        upload_frame(frame_files[-1],client_id)  # 최신 프레임 업로드
-        if len(frame_files) >= 10:
+        #upload_frame(frame_files[-1],client_id)  # 최신 프레임 업로드
+        if len(frame_files) == 10:
             try:
                 upload_db_split(
                     frame_files = frame_files,
                     client_id = client_id,
                     selector = selector,
-                    num_workers=4)
+                    num_workers=1)
             except Exception:
                 traceback.print_exc()
 

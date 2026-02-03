@@ -17,7 +17,7 @@ SYSTEM_MESSAGE = {
     "content": [
         {
             "type": "text",
-            "text": "간결하고 객관적으로 답변하는 AI 어시스턴트입니다."
+            "text": "객관적인 정보만 간략하게 설명하는 요약 에이전트입니다"
         }
     ]
 }
@@ -179,5 +179,5 @@ if __name__ == '__main__':
         json_path='./frame_00.json')
     print(caption)
 
-    report = completion_executor.report("이 이미지에 대한 정보를 요약해줘.")
+    report = completion_executor.report("이 이미지에 대한 정보를 날씨에 대한 한 문장, 그리고 다른 한 문장은 아래의 json 정보를 바탕으로 판단한 객체에 대한 정보를 객관적으로 설명한 한 문장으로 요약해. \n 설명을 할 때 json에 보이는, 탐지된 객체는 명확하게 탐지된 객체라고 명시해 줘야 해.")
     print(report["result"]["message"]["content"])

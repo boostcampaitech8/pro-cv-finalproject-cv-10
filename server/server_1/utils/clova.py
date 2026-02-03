@@ -74,6 +74,7 @@ class CompletionExecutor:
             "topK":0,
             "maxTokens": 100,
             "temperature":0.5,
+            "includeAiFilters":True,
             "repititionPenalty":1.1,
             "stop":[]
         }
@@ -108,6 +109,7 @@ class CompletionExecutor:
                 "temperature": 0.5,
                 "repetitionPenalty": 1.1,
                 "thinking": {"effort": "none"},
+                "includeAiFilters":True,
                 "stop": [],
                 "responseFormat": {
                 "type" : "json",

@@ -28,12 +28,21 @@ SESSION_KEY = bytes.fromhex(os.environ.get("SESSION_KEY_HEX", "11"*32))  # 세�
 HEARTBEAT_TIMEOUT_SEC = int(os.environ.get("HEARTBEAT_TIMEOUT_SEC", "15"))
 WATCHDOG_PERIOD_SEC = float(os.environ.get("WATCHDOG_PERIOD_SEC", "1.0"))
 
+
+LastSentFrame_per_Client = {}  
+FrameCounter_per_Client = {}   
+Selector_per_Clients = dict()
+FrameCounter_per_Clients = dict()
+LastSentFrame_per_Clients = dict()
+TASK_Q = None
+WORKERS = []
+
 URI = os.environ.get("URI")
 # DB 연결
 
 DB_selected = DBManager(
     uri=URI,
-    db_name = "selected_object_caption"
+    db_name = "data_metadata"
 )
 
 DB_streaming  = DBManager(
@@ -44,13 +53,26 @@ DB_streaming  = DBManager(
 #client
 Selector_per_Clients = dict()
 
+TASK_Q = mp.Queue()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+
+    global TASK_Q, WORKERS
+
+    WORKERS = [mp.Process(target=worker_main, args=(TASK_Q,)) for _ in range(5)]
+    task = asyncio.create_task(watchdog_loop())
+    for p in WORKERS:
+        p.start()
+
     task = asyncio.create_task(watchdog_loop())
     try:
         yield
     finally:
-        task.cancel()
+        for _ in WORKERS:
+            TASK_Q.put(None)
+        for p in WORKERS:
+            p.join()
 
 app = FastAPI(default_response_class=ORJSONResponse, lifespan=lifespan)
 
@@ -62,8 +84,6 @@ class ConnectionState:
         self.last_client_id: Optional[str] = None
 
 STATE = {} # 전역 상태 객체
-
-
 
 
 async def watchdog_loop():
@@ -99,6 +119,7 @@ def stage_pair(jpg_src: PyPath, json_src: PyPath, selected_dir: Optional[PyPath]
         fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         os.close(fd)
     except OSError as e:
+        traceback.print_exc()
         if e.errno == errno.EEXIST:
             return None
         raise
@@ -110,6 +131,8 @@ def stage_pair(jpg_src: PyPath, json_src: PyPath, selected_dir: Optional[PyPath]
         os.replace(str(jpg_src), str(jpg_final))
         os.replace(str(json_src), str(json_final))
         return jpg_final, json_final
+    except:
+        traceback.print_exc()
     finally:
         lock_path.unlink(missing_ok=True)
 
@@ -144,6 +167,8 @@ def worker_main(task_q):
                     jpg_path.unlink(missing_ok=True)
                     json_path.unlink(missing_ok=True)
                     continue
+                else:
+                    print("ERROR:",e)
                 raise
 
             caption = clova_caption(str(jpg_path), str(json_path))
@@ -159,59 +184,11 @@ def worker_main(task_q):
             json_path.unlink(missing_ok=True)
 
         except Exception:
+            traceback.print_exc()
             if jpg_path: jpg_path.unlink(missing_ok=True)
             if json_path: json_path.unlink(missing_ok=True)
-            traceback.print_exc()
             
-# --- upload_db_split 교체/수정: 끝나면 store 비우고 selector reset ---
-def upload_db_split(frame_files, client_id, selector, num_workers=4):
-    data_dir = PyPath(f"./store/{client_id}")
-    selected_dir = PyPath(f"./selected_frames/{client_id}")
-    cutoff_ts = time.time()
-
-    to_save = selector.select_best_filenames(frame_files)
-    if not to_save:
-        selector.tracks.clear()
-        selector.next_track_id = 0
-        purge_store_dir(data_dir, cutoff_ts)
-        return
-
-    task_q = mp.Queue()
-    procs = [mp.Process(target=worker_main, args=(task_q,)) for _ in range(num_workers)]
-    for p in procs:
-        p.start()
-
-    try:
-        for img_file in to_save:
-            jpg_src = data_dir / img_file
-            json_src = data_dir / img_file.replace(".jpg", ".json")
-
-            staged = stage_pair(jpg_src, json_src, selected_dir)
-            if staged is None:
-                continue
-
-            jpg_path, json_path = staged
-            task_q.put((str(jpg_path), str(json_path)))
-
-    except Exception:
-        traceback.print_exc()
-    finally:
-        for _ in procs:
-            task_q.put(None)
-        for p in procs:
-            p.join()
-
-        selector.tracks.clear()
-        selector.next_track_id = 0
-        purge_store_dir(data_dir, cutoff_ts)
-    
-    # 폴더에서, "맨 뒤 5프레임" 제외 삭제
-    data_dir = selector.data_dir
-    jpg_paths = sorted(data_dir.glob("*.jpg"), key=lambda p: p.stat().st_mtime)
-    for p in jpg_paths:
-        p.unlink(missing_ok=True)
-        json_p = p.with_suffix(".json")
-        json_p.unlink(missing_ok=True)
+            
 
 def upload_frame(frame_file: str, client_id: str = ""):
     json_file = frame_file.replace(".jpg", ".json")
@@ -254,6 +231,8 @@ async def heartbeat(client_id: str = Form(...), ts: str = Form(...), sig: str = 
 
     return {"ok": True, "server_ts": STATE[client_id].last_seen_ts}
 
+
+
 @app.get("/connection_state")
 async def connection_state():
     return {
@@ -264,6 +243,8 @@ async def connection_state():
     }
 
 # ====== 이미지 업로드 및 다운로드 ======
+
+
 
 # 평문 이미지+json 업로드
 @app.post("/upload_image", response_class=ORJSONResponse)
@@ -297,18 +278,40 @@ async def upload_image(
             f.write(json_bytes)
         
         # DB 및 S3 업로드
-        selector = Selector_per_Clients[client_id]
-        frame_files = sorted([p.name for p in selector.data_dir.glob("*.jpg")])
-        #upload_frame(frame_files[-1],client_id)  # 최신 프레임 업로드
-        if len(frame_files) == 10:
-            try:
-                upload_db_split(
-                    frame_files = frame_files,
-                    client_id = client_id,
-                    selector = selector,
-                    num_workers=1)
-            except Exception:
-                traceback.print_exc()
+        selector: InstanceSelector = Selector_per_Clients[client_id]
+
+        FrameCounter_per_Clients[client_id] = FrameCounter_per_Clients.get(client_id, 0) + 1
+        server_frame_idx = FrameCounter_per_Clients[client_id]
+
+        LastSentFrame_per_Clients.setdefault(client_id, {})
+
+        latest_jpg = f"{client_id}@{curtime}.jpg"
+        new_ids, touched_ids = selector.update_one(latest_jpg)
+
+        to_send = set(new_ids)
+
+        for tid in touched_ids:
+            last = LastSentFrame_per_Clients[client_id].get(tid)
+            if last is not None and (server_frame_idx - last) >= 20:
+                to_send.add(tid)
+
+        data_dir = PyPath(f"./store/{client_id}")
+        selected_dir = PyPath(f"./selected_frames/{client_id}")
+
+        for tid in sorted(to_send):
+            fname = selector.get_best_filename_for_track(tid)
+            if fname is None:
+                continue
+
+            jpg_src = data_dir / fname
+            json_src = data_dir / fname.replace(".jpg", ".json")
+            staged = stage_pair(jpg_src, json_src, selected_dir)
+            if staged is None:
+                continue
+
+            jpg_path, json_path = staged
+            TASK_Q.put((str(jpg_path), str(json_path)))
+            LastSentFrame_per_Clients[client_id][tid] = server_frame_idx
 
         return {"ok": True, "image_id": image_id, "client_id": client_id, "ts": ts, "meta_keys": list(meta.keys())}
     except HTTPException as e:

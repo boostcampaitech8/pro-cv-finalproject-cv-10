@@ -334,7 +334,6 @@ class ByteTrackAdvanced:
         frame_detections = self._load_frame_detections(frame_filenames)
 
         self.update(frame_detections)
-
         
         selected = []
         for track_id, track in sorted(self.tracks.items()):
@@ -369,6 +368,65 @@ class ByteTrackAdvanced:
             }
         
         return summary
+
+
+    def update_one(self, frame_filename: str):
+        frame_dets = self._load_frame_detections([frame_filename])[0]
+
+        new_track_ids = []
+        touched_track_ids = []
+
+        high_conf_dets = [d for d in frame_dets if d.confidence >= self.confidence_thresh]
+        low_conf_dets  = [d for d in frame_dets if d.confidence < self.confidence_thresh]
+
+        active_tracks = [t for t in self.tracks.values() if t.time_since_update < self.max_age]
+
+        cost_high = self._compute_cost_matrix(high_conf_dets, active_tracks, self.iou_thresh_high)
+        matches_high, unmatch_high_dets, unmatch_high_tracks = self._hungarian_matching(cost_high, max_cost=0.5)
+
+        for d_idx, t_idx in matches_high:
+            tr = active_tracks[t_idx]
+            tr.add_detection(high_conf_dets[d_idx])
+            tr.is_confirmed = True
+            touched_track_ids.append(tr.track_id)
+
+        for d_idx in unmatch_high_dets:
+            tr = Track(track_id=self.next_track_id)
+            tr.add_detection(high_conf_dets[d_idx])
+            tr.is_confirmed = True
+            self.tracks[self.next_track_id] = tr
+            new_track_ids.append(self.next_track_id)
+            touched_track_ids.append(self.next_track_id)
+            self.next_track_id += 1
+
+        unmatched_active_tracks = [active_tracks[i] for i in unmatch_high_tracks]
+        confirmed_tracks = [t for t in unmatched_active_tracks if t.is_confirmed]
+
+        cost_low = self._compute_cost_matrix(low_conf_dets, confirmed_tracks, self.iou_thresh_low)
+        matches_low, _, _ = self._hungarian_matching(cost_low, max_cost=0.7)
+
+        for d_idx, t_idx in matches_low:
+            tr = confirmed_tracks[t_idx]
+            tr.add_detection(low_conf_dets[d_idx])
+            touched_track_ids.append(tr.track_id)
+
+        for track_id, tr in list(self.tracks.items()):
+            if tr.time_since_update == 0:
+                continue
+            tr.increment_age()
+            if tr.time_since_update > self.max_age:
+                del self.tracks[track_id]
+
+        touched_track_ids = list(dict.fromkeys(touched_track_ids))
+        return new_track_ids, touched_track_ids
+
+
+    def get_best_filename_for_track(self, track_id: int):
+        tr = self.tracks.get(track_id)
+        if tr is None or len(tr.detections) == 0:
+            return None
+        best_det = tr.get_best_detection(metric="area")
+        return best_det.filename
 
 
 def main():

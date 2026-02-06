@@ -130,8 +130,8 @@ class CompletionExecutor:
                     "detected_object",
                     ]
                 }
-                }
             }
+        }
         response = requests.post(self._host + '/v3/chat-completions/HCX-007',
                                 headers=headers,
                                 data= json.dumps(data),

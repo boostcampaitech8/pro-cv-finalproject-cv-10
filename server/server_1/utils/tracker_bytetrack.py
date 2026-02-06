@@ -68,9 +68,9 @@ class Track:
     
     def get_best_detection(self, metric="confidence") -> Detection:
         if metric == "area":
-            return max(self.detections, key=lambda d: d.get_area())
+            return max(self.detections[-20:], key=lambda d: d.get_area())
         elif metric == "confidence":
-            return max(self.detections, key=lambda d: d.confidence)
+            return max(self.detections[-20:], key=lambda d: d.confidence)
         else:
             return self.detections[-1]
     

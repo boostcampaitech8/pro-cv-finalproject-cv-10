@@ -137,7 +137,7 @@ def stage_pair(jpg_src: PyPath, json_src: PyPath, selected_dir: Optional[PyPath]
         lock_path.unlink(missing_ok=True)
 
 def worker_main(task_q):
-    db = DBManager(uri=URI, db_name="selected_object_caption")
+    db = DBManager(uri=URI, db_name="data_metadata")
 
     while True:
         item = task_q.get()
@@ -145,15 +145,21 @@ def worker_main(task_q):
             break
 
         jpg_path = json_path = None
+        
+
         try:
             jpg_path, json_path = PyPath(item[0]), PyPath(item[1])
-
+            
+            created_at_str = jpg_path.stem.split("@")[1],
+            print(created_at_str)
+            created_at_dt = datetime.strptime(created_at_str[0],"%Y-%m-%d %H:%M:%S.%f")
+            print(created_at_dt)
             with open(json_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)
 
             try:
                 db.create(
-                    created_at=jpg_path.stem.split("@")[1],
+                    created_at=created_at_dt,
                     remote_file_path=f"images/{jpg_path.name}",
                     location_name=meta.get("location", "unknown"),
                     client_id=json_path.name.split("@")[0],
@@ -163,6 +169,7 @@ def worker_main(task_q):
                     report="",
                 )
             except Exception as e:
+                print("ERROR",e)
                 if isinstance(e, DuplicateKeyError) or ("E11000" in str(e)):
                     jpg_path.unlink(missing_ok=True)
                     json_path.unlink(missing_ok=True)
@@ -245,7 +252,6 @@ async def connection_state():
 # ====== 이미지 업로드 및 다운로드 ======
 
 
-
 # 평문 이미지+json 업로드
 @app.post("/upload_image", response_class=ORJSONResponse)
 async def upload_image(
@@ -292,7 +298,7 @@ async def upload_image(
 
         for tid in touched_ids:
             last = LastSentFrame_per_Clients[client_id].get(tid)
-            if last is not None and (server_frame_idx - last) >= 20:
+            if last is not None and (server_frame_idx - last) >= 10:
                 to_send.add(tid)
 
         data_dir = PyPath(f"./store/{client_id}")

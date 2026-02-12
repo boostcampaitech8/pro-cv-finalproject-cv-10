@@ -44,25 +44,30 @@
 <br><br>
 
 
-## 🔍 세부 사항
+## 🔍 활용 모델 및 데이터베이스 구조
 
-### 열화 개선 모델
+### 이미지 복원 모델
+
 - **BioIR** <br>
 
 <img src="./misc/bioir.png" width="600" align="center" hspace=50>
 <br><br>
+  
+  인간 시각에서의 중심 시야와 주변 시야의 상호작용을 모사한 복합 열화 이미지 복원 모델입니다. 후술할 OneRestore와 같이 U-Net 구조를 가져 지식 증류에 유리하고 최신 이미지 복원 모델 중 높은 성능 지표를 보여 Teacher 모델로 선정했습니다.
 
 - **OneRestore** <br>
 
 <img src="./misc/onerestore.png" width="600" align="center" hspace=50>
 <br><br>
 
-### 지식 증류 과정
+  복합 열화 환경에서 안정적인 복원 성능을 가지고 있으면서도, 약 598만개의 파라미터로 구성된 경량 모델로 Edge Device에서의 On-Device 추론에 적합하여 Student 모델로 선정했습니다.
 
 - **Feature 기반 지식 증류** <br>
 
 <img src="./misc/kd.png" width="600" align="center" hspace=50>
 <br><br>
+
+  높은 이미지 복원 성능의 Teacher 모델의 지식을 Student 모델로 이식하여 On-Device 추론에 활용하기 위해, feature 기반 지식 증류를 적용했습니다. 각 모델의 최종 디코더 출력 feature를 바탕으로 계산된 distillation loss를 사용합니다.
 
 ### 객체 탐지 모델
 
@@ -71,11 +76,14 @@
 <img src="./misc/yolov8.png" width="600" align="center" hspace=50>
 <br><br>
 
+Single-stage 객체 탐지 모델로서, 특히 nano 모델의 경우 실시간성을 유지하면서 작은 객체도 잘 식별하기 때문에 정확도 측면에서도 뛰어날 것이라 판단하여 선정했습니다.
+
 - **SSD MobileNet V2** <br>
 
 <img src="./misc/ssdMobileNet.png" width="600" align="center" hspace=50>
 <br><br>
 
+Google Coral에서 공식적으로 지원하는 객체 탐지 모델입니다. 초경량 및 저전력의 엣지 디바이스에 최적화되어 있으며 실시간성 측면에서 강점을 가져 선정했습니다.
 
 ### DB 스키마
 
@@ -149,7 +157,7 @@
 | OneRestore KD | YOLOv8n | 0.390 | 8.77~12.1 | 82.5~114 |
 </div>
 
-### 결과 이미지
+### 이미지 복원 및 탐지 결과
 
 <table style="border: none; border-collapse: collapse;">
   <tr style="border: none;">
@@ -177,9 +185,9 @@
 |                                                   팀원                                                    |                                 역할                                  |
 | :-------------------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------: |
 |     도담록     |  데이터 수집 및 EDA, 메인서버 구현, DB 구현, DB 및 Clova Studio 메인 서버 연동  |
-|     정현우     | 프로젝트 운영 및 테스트 설계, 열화 개선 모델 학습, 열 개선 모델 Jetson Orin Nano 최적화, CCTV 모듈 개발     |
+|     정현우     | 프로젝트 운영 및 테스트 설계, 이미지 복원 모델 학습, 이미지 복원 모델 Jetson Orin Nano 최적화, CCTV 모듈 개발     |
 |     조예원     | 데이터 수집 및 EDA, 가상 열화 데이터 생성, 웹 서버 구축 (프론트엔드 / 백엔드), 웹 서버와 DB 연동 |
-|     최중식     | 열화 개선 모델 학습, 열화 개선 모델 경량화 및 테스트, 가상 열화 데이터 생성  |
+|     최중식     | 이미지 복원 모델 학습, 이미지 복원 모델 경량화 및 테스트, 가상 열화 데이터 생성  |
 |     최진우     | 객체 인식 모델 학습, 객체 인식 모델 추론 최적화, CCTV 모듈 개발  |
 
 

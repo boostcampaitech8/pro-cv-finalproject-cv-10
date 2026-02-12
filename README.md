@@ -51,124 +51,343 @@
 - **BioIR** <br>
 
 <img src="./misc/bioir.png" width="600" align="center" hspace=50>
-<br><br>
   
   인간 시각에서의 중심 시야와 주변 시야의 상호작용을 모사한 복합 열화 이미지 복원 모델입니다. 후술할 OneRestore와 같이 U-Net 구조를 가져 지식 증류에 유리하고 최신 이미지 복원 모델 중 높은 성능 지표를 보여 Teacher 모델로 선정했습니다.
+<br><br>
 
 - **OneRestore** <br>
 
 <img src="./misc/onerestore.png" width="600" align="center" hspace=50>
-<br><br>
 
   복합 열화 환경에서 안정적인 복원 성능을 가지고 있으면서도, 약 598만개의 파라미터로 구성된 경량 모델로 Edge Device에서의 On-Device 추론에 적합하여 Student 모델로 선정했습니다.
+<br><br>
 
 - **Feature 기반 지식 증류** <br>
 
 <img src="./misc/kd.png" width="600" align="center" hspace=50>
-<br><br>
 
   높은 이미지 복원 성능의 Teacher 모델의 지식을 Student 모델로 이식하여 On-Device 추론에 활용하기 위해, feature 기반 지식 증류를 적용했습니다. 각 모델의 최종 디코더 출력 feature를 바탕으로 계산된 distillation loss를 사용합니다.
+<br><br>
 
 ### 객체 탐지 모델
 
 - **YOLOv8n** <br>
 
 <img src="./misc/yolov8.png" width="600" align="center" hspace=50>
-<br><br>
 
 Single-stage 객체 탐지 모델로서, 특히 nano 모델의 경우 실시간성을 유지하면서 작은 객체도 잘 식별하기 때문에 정확도 측면에서도 뛰어날 것이라 판단하여 선정했습니다.
+<br><br>
 
 - **SSD MobileNet V2** <br>
 
 <img src="./misc/ssdMobileNet.png" width="600" align="center" hspace=50>
-<br><br>
 
 Google Coral에서 공식적으로 지원하는 객체 탐지 모델입니다. 초경량 및 저전력의 엣지 디바이스에 최적화되어 있으며 실시간성 측면에서 강점을 가져 선정했습니다.
+<br><br>
 
 ### DB 스키마
 
 - 객체 탐지 결과
-<div align="center">
 
-| Name | Type | Description |
-| :--- | :--- | :--- |
-| **created_at** | datetime | 이미지가 생성된 시각 |
-| **remote_file_path** | string | 해당하는 이미지의 AWS S3 저장 경로 |
-| **location_name** | string | 이미지가 촬영된 위치 |
-| **client_id** | string | 이미지를 보낸 Client의 ID |
-| **metadata** | json | Edge Device의 Object Detection 결과 |
-| **caption** | string | HCX-005가 분석한 이미지 정보 |
-| **report** | json | HCX-007가 구조화한 캡션 정보 |
-</div>
+<table width="100%" align="center">
+  <thead>
+    <tr>
+      <th width="20%" align="center">Name</th>
+      <th width="15%" align="center">Type</th>
+      <th align="center">Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center"><b>created_at</b></td>
+      <td align="center">datetime</td>
+      <td>이미지가 생성된 시각</td>
+    </tr>
+    <tr>
+      <td align="center"><b>remote_file_path</b></td>
+      <td align="center">string</td>
+      <td>해당하는 이미지의 AWS S3 저장 경로</td>
+    </tr>
+    <tr>
+      <td align="center"><b>location_name</b></td>
+      <td align="center">string</td>
+      <td>이미지가 촬영된 위치</td>
+    </tr>
+    <tr>
+      <td align="center"><b>client_id</b></td>
+      <td align="center">string</td>
+      <td>이미지를 보낸 Client의 ID</td>
+    </tr>
+    <tr>
+      <td align="center"><b>metadata</b></td>
+      <td align="center">json</td>
+      <td>Edge Device의 Object Detection 결과</td>
+    </tr>
+    <tr>
+      <td align="center"><b>caption</b></td>
+      <td align="center">string</td>
+      <td>HCX-005가 분석한 이미지 정보</td>
+    </tr>
+    <tr>
+      <td align="center"><b>report</b></td>
+      <td align="center">json</td>
+      <td>HCX-007가 구조화한 캡션 정보</td>
+    </tr>
+  </tbody>
+</table>
 
 - 엣지 디바이스 상태
 
-<div align="center">
-
-| Name | Type | Description |
-| :--- | :--- | :--- |
-| **client_id** | string | Edge Device의 ID |
-| **status** | Bool | Edge Device 연결 여부 |
-| **updated_at** | datetime | 마지막으로 Heartbeat를 보낸 시간 |
-</div>
+<table width="100%" align="center">
+  <thead>
+    <tr>
+      <th width="20%" align="center">Name</th>
+      <th width="15%" align="center">Type</th>
+      <th align="center">Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center"><b>client_id</b></td>
+      <td align="center">string</td>
+      <td>Edge Device의 ID</td>
+    </tr>
+    <tr>
+      <td align="center"><b>status</b></td>
+      <td align="center">Bool</td>
+      <td>Edge Device 연결 여부</td>
+    </tr>
+    <tr>
+      <td align="center"><b>updated_at</b></td>
+      <td align="center">datetime</td>
+      <td>마지막으로 Heartbeat를 보낸 시간</td>
+    </tr>
+  </tbody>
+</table>
 
 ### 활용 데이터셋 명세
 
-| Usage | Dataset | Source | Type | # Samples | Description |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Image Restoration** | 눈, 비, 안개 등의 다양한 외부 환경 노이즈 제거를 위한 영상 데이터 | AI-Hub | Real | Train 285<br>Test 69 | - 해상 상황에서 빈번하게 발생하는 시야 저하 조건 중심 수집<br>- 영상 단위 기준으로 Train/Validation 데이터 분리 |
-| **Image Restoration** | 해무/안개 CCTV 데이터 | AI-Hub | Real | Train 19<br>Test 14 | - 안개 없는(no-fog) 영상을 GT 또는 기준 영상으로 활용 (카메라 각도, 촬영 위치, 배경 유사성 고려) |
-| **Image Restoration** | LMHaze (Zhang, Ruikun, et al.) | - | Real | Train 144<br>Test 48 | - 실내·실외에서 인위적으로 안개를 조성해 구축한 데이터셋<br>- 과도한 안개로 정보가 소실된 샘플과 유사 데이터는 선별적으로 제거 |
-| **Image Restoration** | RESIDE-6K (Liu, Bing, et al.) | - | Synthetic | Train 3000<br>Test 331 | - 실제 영상에 Synthetic 안개를 적용해 구성한 데이터셋<br>- GT에 안개가 포함되었거나 열화 강도가 부적절한 샘플은 제거 |
-| **Image Restoration** | Singapore maritime dataset (D. K. Prasad et al.) | - | Real | Train 446<br>Test 181 | - 해무가 존재하는 영상만 선별<br>- 열화의 종류를 판별하는 Embedder 학습 및 모델 테스트에 사용 |
-| **Object Detection** | 군 경계 작전 환경 내 인식 데이터 | AI-Hub | Real | Train 37766<br>Test 9450 | - 객체 클래스 분포를 유지하도록 Group-Stratified Split으로 8:2 분할 |
+<table width="100%" align="center">
+  <thead>
+    <tr>
+      <th align="center">Usage</th>
+      <th align="center">Dataset</th>
+      <th align="center">Source</th>
+      <th align="center">Type</th>
+      <th align="center"># Samples</th>
+      <th align="center">Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center"><b>Image Restoration</b></td>
+      <td>외부 환경 노이즈 제거 영상 데이터</td>
+      <td align="center">AI-Hub</td>
+      <td align="center">Real</td>
+      <td align="center">Train 285<br>Test 69</td>
+      <td align="justify">- 해상 시야 저하 조건 중심 수집<br>- 영상 단위 Train/Val 분리</td>
+    </tr>
+    <tr>
+      <td align="center"><b>Image Restoration</b></td>
+      <td>해무/안개 CCTV 데이터</td>
+      <td align="center">AI-Hub</td>
+      <td align="center">Real</td>
+      <td align="center">Train 19<br>Test 14</td>
+      <td align="justify">- no-fog 영상을 GT로 활용<br>- 카메라 각도, 배경 유사성 고려</td>
+    </tr>
+    <tr>
+      <td align="center"><b>Image Restoration</b></td>
+      <td>LMHaze (Zhang et al.)</td>
+      <td align="center">-</td>
+      <td align="center">Real</td>
+      <td align="center">Train 144<br>Test 48</td>
+      <td align="justify">- 인위적 안개 조성 데이터셋<br>- 정보 소실 샘플 선별 제거</td>
+    </tr>
+    <tr>
+      <td align="center"><b>Image Restoration</b></td>
+      <td>RESIDE-6K (Liu et al.)</td>
+      <td align="center">-</td>
+      <td align="center">Synthetic</td>
+      <td align="center">Train 3000<br>Test 331</td>
+      <td align="justify">- 실제 영상에 Synthetic 안개 적용<br>- 열화 강도 부적절 샘플 제거</td>
+    </tr>
+    <tr>
+      <td align="center"><b>Image Restoration</b></td>
+      <td>Singapore maritime dataset</td>
+      <td align="center">-</td>
+      <td align="center">Real</td>
+      <td align="center">Train 446<br>Test 181</td>
+      <td align="justify">- 해무 존재 영상만 선별<br>- Embedder 학습 및 테스트용</td>
+    </tr>
+    <tr>
+      <td align="center"><b>Object Detection</b></td>
+      <td>군 경계 작전 환경 데이터</td>
+      <td align="center">AI-Hub</td>
+      <td align="center">Real</td>
+      <td align="center">Train 37766<br>Test 9450</td>
+      <td align="justify">- 객체 클래스 분포 유지<br>- Group-Stratified Split (8:2)</td>
+    </tr>
+  </tbody>
+</table>
 
 ## 테스트 결과
 
 ### Image Restoration
-<div align="center">
 
-| Model | Input Image Size | PSNR (↑) | SSIM (↑) | KD | TensorRT | FPS | Latency (ms) |
-| :--- | :---: | ---: | ---: | :---: | :---: | :---: | ---: |
-| **BioIR (Teacher)** | 640x360 | 30.6160 | 0.9477 | X | X | - | - |
-| **OneRestore (Student)** | 640x360 | 23.2825 | 0.9118 | X | O | 6.63 ~ 6.97 | 143 ~ 150ms |
-| **OneRestore KD** | 640x640 | 26.9925 | 0.8932 | O | O | 6.63 ~ 6.97 | 143 ~ 150ms |
-</div>
+<table width="100%" align="center">
+  <thead>
+    <tr>
+      <th align="center">Model</th>
+      <th align="center">Input Size</th>
+      <th align="center">PSNR (↑)</th>
+      <th align="center">SSIM (↑)</th>
+      <th align="center">KD</th>
+      <th align="center">TRT</th>
+      <th align="center">FPS</th>
+      <th align="center">Latency (ms)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center"><b>BioIR (Teacher)</b></td>
+      <td align="center">640x360</td>
+      <td align="right">30.6160</td>
+      <td align="right">0.9477</td>
+      <td align="center">X</td>
+      <td align="center">X</td>
+      <td align="center">-</td>
+      <td align="center">-</td>
+    </tr>
+    <tr>
+      <td align="center"><b>OneRestore (Student)</b></td>
+      <td align="center">640x360</td>
+      <td align="right">23.2825</td>
+      <td align="right">0.9118</td>
+      <td align="center">X</td>
+      <td align="center">O</td>
+      <td align="center">6.63 ~ 6.97</td>
+      <td align="right">143 ~ 150</td>
+    </tr>
+    <tr>
+      <td align="center"><b>OneRestore KD</b></td>
+      <td align="center">640x640</td>
+      <td align="right">26.9925</td>
+      <td align="right">0.8932</td>
+      <td align="center">O</td>
+      <td align="center">O</td>
+      <td align="center">6.63 ~ 6.97</td>
+      <td align="right">143 ~ 150</td>
+    </tr>
+  </tbody>
+</table>
 
 ### Object Detection
-<div align="center">
 
-| Model | Input Image Size | mAP50 | PTQ | FPS | Latency(ms) |
-| --- | --- | --- | --- | --- | --- |
-| YOLOv8n | 512x512 | 0.01 | X | 19~28 | 36~52 |
-| YOLOv8n | 640x640 | 0.237 | X | 8.66~12.1 | 82.8~115.5 |
-| YOLOv8n | 512x512 | 0.278 | O | 21.1~27.9 | 35.8~47.4 |
-| YOLOv8n | 640x640 | 0.498 | O | 8.6~12.3 | 81~116 |
-| SSD MobileNet V2 | 640x640 | 0.123 | O | 4~4.8 | 209.1~249.2 |
-</div>
+
+<table width="100%" align="center">
+  <thead>
+    <tr>
+      <th align="center">Model</th>
+      <th align="center">Input Image Size</th>
+      <th align="center">mAP50</th>
+      <th align="center">PTQ</th>
+      <th align="center">FPS</th>
+      <th align="center">Latency (ms)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center">YOLOv8n</td>
+      <td align="center">512x512</td>
+      <td align="right">0.010</td>
+      <td align="center">X</td>
+      <td align="center">19 ~ 28</td>
+      <td align="right">36 ~ 52</td>
+    </tr>
+    <tr>
+      <td align="center">YOLOv8n</td>
+      <td align="center">640x640</td>
+      <td align="right">0.237</td>
+      <td align="center">X</td>
+      <td align="center">8.66 ~ 12.1</td>
+      <td align="right">82.8 ~ 115.5</td>
+    </tr>
+    <tr>
+      <td align="center">YOLOv8n</td>
+      <td align="center">512x512</td>
+      <td align="right">0.278</td>
+      <td align="center">O</td>
+      <td align="center">21.1 ~ 27.9</td>
+      <td align="right">35.8 ~ 47.4</td>
+    </tr>
+    <tr>
+      <td align="center">YOLOv8n</td>
+      <td align="center">640x640</td>
+      <td align="right"><b>0.498</b></td>
+      <td align="center">O</td>
+      <td align="center">8.6 ~ 12.3</td>
+      <td align="right">81 ~ 116</td>
+    </tr>
+    <tr>
+      <td align="center">SSD MobileNet V2</td>
+      <td align="center">640x640</td>
+      <td align="right">0.123</td>
+      <td align="center">O</td>
+      <td align="center">4 ~ 4.8</td>
+      <td align="right">209.1 ~ 249.2</td>
+    </tr>
+  </tbody>
+</table>
 
 ### Image Restoration → Object Detection
-<div align="center">
 
-| Restorer | Detector* | mAP50 | FPS | Latency(ms) |
-| --- | --- | --- | --- | --- |
-| Original | YOLOv8n | 0.313 | 9.79~12.1 | 82.7~102.1 |
-| OneRestore | YOLOv8n | 0.304 | 7.84~12.1 | 82.7~127.6 |
-| OneRestore KD | YOLOv8n | 0.390 | 8.77~12.1 | 82.5~114 |
-</div>
+<table width="100%" align="center">
+  <thead>
+    <tr>
+      <th align="center">Restorer</th>
+      <th align="center">Detector</th>
+      <th align="center">mAP50</th>
+      <th align="center">FPS</th>
+      <th align="center">Latency (ms)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center">Original</td>
+      <td align="center">YOLOv8n</td>
+      <td align="right">0.313</td>
+      <td align="center">9.79 ~ 12.1</td>
+      <td align="right">82.7 ~ 102.1</td>
+    </tr>
+    <tr>
+      <td align="center">OneRestore</td>
+      <td align="center">YOLOv8n</td>
+      <td align="right">0.304</td>
+      <td align="center">7.84 ~ 12.1</td>
+      <td align="right">82.7 ~ 127.6</td>
+    </tr>
+    <tr>
+      <td align="center"><b>OneRestore KD</b></td>
+      <td align="center">YOLOv8n</td>
+      <td align="right"><b>0.390</b></td>
+      <td align="center">8.77 ~ 12.1</td>
+      <td align="right">82.5 ~ 114</td>
+    </tr>
+  </tbody>
+</table>
 
 ### 이미지 복원 및 탐지 결과
 
-<table style="border: none; border-collapse: collapse;">
+<table style="border: none; border-collapse: collapse; width: 100%;" align="center">
   <tr style="border: none;">
     <td style="border: none;" width="33%"><img src="./misc/res_original.png" width="100%"></td>
     <td style="border: none;" width="33%"><img src="./misc/res_onerestore.png" width="100%"></td>
     <td style="border: none;" width="33%"><img src="./misc/res_onerestoreKD.png" width="100%"></td>
   </tr>
-  <tr style="border: none; text-align: center;">
-    <td style="border: none;"><b>Original Image</b></td>
-    <td style="border: none;"><b>OneRestore</b></td>
-    <td style="border: none;"><b>OneRestore + KD</b></td>
+  <tr style="border: none;">
+    <td style="border: none;" align="center"><b>Original Image</b></td>
+    <td style="border: none;" align="center"><b>OneRestore</b></td>
+    <td style="border: none;" align="center"><b>OneRestore + KD</b></td>
   </tr>
 </table>
 
@@ -185,29 +404,29 @@ Google Coral에서 공식적으로 지원하는 객체 탐지 모델입니다. �
 <table>
   <thead>
     <tr>
-      <th style="text-align: center; min-width: 100px;">팀원</th>
+      <th style="text-align: center;">팀원</th>
       <th style="text-align: center;">역할</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td style="text-align: center; white-space: nowrap;"><b>도담록</b></td>
+      <td style="white-space: nowrap;" width="90px" align="center"><nobr><b>도담록</b></td>
       <td style="text-align: justify;">데이터 수집 및 EDA, 메인서버 구현, DB 구현, DB 및 Clova Studio 메인 서버 연동</td>
     </tr>
     <tr>
-      <td style="text-align: center; white-space: nowrap;"><b>정현우</b></td>
+      <td style="white-space: nowrap;" width="90px" align="center"><b>정현우</b></td>
       <td style="text-align: justify;">프로젝트 운영 및 테스트 설계, 이미지 복원 모델 학습, 이미지 복원 모델 Jetson Orin Nano 최적화, CCTV 모듈 개발</td>
     </tr>
     <tr>
-      <td style="text-align: center; white-space: nowrap;"><b>조예원</b></td>
+      <td style="white-space: nowrap;" width="90px" align="center"><b>조예원</b></td>
       <td style="text-align: justify;">데이터 수집 및 EDA, 가상 열화 데이터 생성, 웹 서버 구축 (프론트엔드 / 백엔드), 웹 서버와 DB 연동</td>
     </tr>
     <tr>
-      <td style="text-align: center; white-space: nowrap;"><b>최중식</b></td>
+      <td style="white-space: nowrap;" width="90px" align="center"><b>최중식</b></td>
       <td style="text-align: justify;">이미지 복원 모델 학습, 이미지 복원 모델 경량화 및 테스트, 가상 열화 데이터 생성</td>
     </tr>
     <tr>
-      <td style="text-align: center; white-space: nowrap;"><b>최진우</b></td>
+      <td style="white-space: nowrap;" width="90px" align="center"><b>최진우</b></td>
       <td style="text-align: justify;">객체 인식 모델 학습, 객체 인식 모델 추론 최적화, CCTV 모듈 개발</td>
     </tr>
   </tbody>

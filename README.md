@@ -161,9 +161,9 @@ Google Coral에서 공식적으로 지원하는 객체 탐지 모델입니다. �
 
 <table style="border: none; border-collapse: collapse;">
   <tr style="border: none;">
-    <td style="border: none;"><img src="./misc/res_original.png" width="250"></td>
-    <td style="border: none;"><img src="./misc/res_onerestore.png" width="250"></td>
-    <td style="border: none;"><img src="./misc/res_onerestoreKD.png" width="250"></td>
+    <td style="border: none;" width="33%"><img src="./misc/res_original.png" width="100%"></td>
+    <td style="border: none;" width="33%"><img src="./misc/res_onerestore.png" width="100%"></td>
+    <td style="border: none;" width="33%"><img src="./misc/res_onerestoreKD.png" width="100%"></td>
   </tr>
   <tr style="border: none; text-align: center;">
     <td style="border: none;"><b>Original Image</b></td>
@@ -182,13 +182,36 @@ Google Coral에서 공식적으로 지원하는 객체 탐지 모델입니다. �
 
 <div align="center">
 
-|                                                   팀원                                                    |                                 역할                                  |
-| :-------------------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------: |
-|     도담록     |  데이터 수집 및 EDA, 메인서버 구현, DB 구현, DB 및 Clova Studio 메인 서버 연동  |
-|     정현우     | 프로젝트 운영 및 테스트 설계, 이미지 복원 모델 학습, 이미지 복원 모델 Jetson Orin Nano 최적화, CCTV 모듈 개발     |
-|     조예원     | 데이터 수집 및 EDA, 가상 열화 데이터 생성, 웹 서버 구축 (프론트엔드 / 백엔드), 웹 서버와 DB 연동 |
-|     최중식     | 이미지 복원 모델 학습, 이미지 복원 모델 경량화 및 테스트, 가상 열화 데이터 생성  |
-|     최진우     | 객체 인식 모델 학습, 객체 인식 모델 추론 최적화, CCTV 모듈 개발  |
+<table>
+  <thead>
+    <tr>
+      <th style="text-align: center; min-width: 100px;">팀원</th>
+      <th style="text-align: center;">역할</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align: center; white-space: nowrap;"><b>도담록</b></td>
+      <td style="text-align: justify;">데이터 수집 및 EDA, 메인서버 구현, DB 구현, DB 및 Clova Studio 메인 서버 연동</td>
+    </tr>
+    <tr>
+      <td style="text-align: center; white-space: nowrap;"><b>정현우</b></td>
+      <td style="text-align: justify;">프로젝트 운영 및 테스트 설계, 이미지 복원 모델 학습, 이미지 복원 모델 Jetson Orin Nano 최적화, CCTV 모듈 개발</td>
+    </tr>
+    <tr>
+      <td style="text-align: center; white-space: nowrap;"><b>조예원</b></td>
+      <td style="text-align: justify;">데이터 수집 및 EDA, 가상 열화 데이터 생성, 웹 서버 구축 (프론트엔드 / 백엔드), 웹 서버와 DB 연동</td>
+    </tr>
+    <tr>
+      <td style="text-align: center; white-space: nowrap;"><b>최중식</b></td>
+      <td style="text-align: justify;">이미지 복원 모델 학습, 이미지 복원 모델 경량화 및 테스트, 가상 열화 데이터 생성</td>
+    </tr>
+    <tr>
+      <td style="text-align: center; white-space: nowrap;"><b>최진우</b></td>
+      <td style="text-align: justify;">객체 인식 모델 학습, 객체 인식 모델 추론 최적화, CCTV 모듈 개발</td>
+    </tr>
+  </tbody>
+</table>
 
 
 </div>
